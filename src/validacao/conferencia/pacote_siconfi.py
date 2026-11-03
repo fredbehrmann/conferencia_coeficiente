@@ -27,7 +27,7 @@ import pandas as pd
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from validacao.cadastro import garantir_municipio
+from validacao.cadastro import garantir_ente, garantir_municipio
 from validacao.db import conectar
 from validacao.conferencia import modelos as cf
 from validacao.conferencia.catalogo import semear_catalogo
@@ -290,10 +290,14 @@ def importar_pacote(engine, pasta: Path, usuario: str = "sistema", pasta_detalhe
                                                  "valor": f"{linha.get('cod_ibge')}/{linha.get('ano')}/{texto_componente}",
                                                  "erro": "Linha sem ente, exercício ou componente reconhecido"})
                 continue
+            if esfera == "M" and codigo // 100000 == 53:  # Brasília: o DF é um ente único (código 53, esfera D)
+                if codigo not in conhecidos:
+                    relatorio["ocorrencias"].append({"linha": posicao, "coluna": "cod_ibge", "valor": str(codigo),
+                                                     "erro": "Brasília como município: o DF é tratado como ente único (código 53)"})
+                    continue
             if codigo not in conhecidos:
-                if esfera == "M":
-                    garantir_municipio(session, codigo, str(linha.get("ente", "")), conhecidos)
-                else:
+                esfera_ente = {"M": "MUNICIPIO", "E": "ESTADO", "D": "DF"}.get(esfera)
+                if esfera_ente is None or not garantir_ente(session, codigo, esfera_ente, str(linha.get("ente", "")), conhecidos):
                     relatorio["ocorrencias"].append({"linha": posicao, "coluna": "cod_ibge", "valor": str(codigo),
                                                      "erro": "Ente não encontrado no cadastro"})
                     continue

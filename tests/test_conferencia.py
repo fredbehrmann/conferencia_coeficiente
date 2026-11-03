@@ -1008,3 +1008,25 @@ def test_pacote_siconfi_enviado_pela_tela(tmp_path):
         assert "Último pacote enviado pela tela" in pagina and "5 de 5 encontrados" in pagina
     with Session(criar_engine(destino)) as session:
         assert session.scalar(select(func.count()).select_from(cf.Registro).where(cf.Registro.declaracao_id == "SICONFI_RREO")) > 0
+
+
+def test_pacote_siconfi_em_banco_vazio(tmp_path):
+    """Banco novo (ex.: volume vazio na Railway): o pacote não pode falhar por falta do cadastro de fontes."""
+    from validacao.cadastro import garantir_ente
+    from validacao.conferencia.demo import gerar_pacote_ficticio
+    from validacao.conferencia.migracao import preparar
+    from validacao.conferencia.pacote_siconfi import importar_pacote
+    from validacao.modelos import Ente, EnteCodigoExterno
+
+    engine = criar_engine(tmp_path / "vazio.sqlite")
+    preparar(engine)
+    resultado = importar_pacote(engine, gerar_pacote_ficticio(tmp_path / "pacote"), "teste", tmp_path)
+    assert resultado["SICONFI_RREO"]["situacao"] == "IMPORTADO"
+    with Session(engine) as session:
+        conhecidos = set(session.scalars(select(Ente.id_ente)))
+        assert garantir_ente(session, 29, "ESTADO", "Bahia", conhecidos)  # estado novo entra no cadastro
+        assert garantir_ente(session, 2927408, "MUNICIPIO", "Salvador", conhecidos)
+        assert not garantir_ente(session, 99, "ESTADO", "Inexistente", conhecidos)
+        session.commit()
+        assert session.get(Ente, 29).uf == "BA"
+        assert session.scalar(select(func.count()).select_from(EnteCodigoExterno).where(EnteCodigoExterno.id_ente == 2927408)) == 4

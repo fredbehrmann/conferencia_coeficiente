@@ -163,6 +163,29 @@ def garantir_municipio(session: Session, id_ente: int, nome: str, conhecidos: se
     conhecidos.add(id_ente)
 
 
+def garantir_ente(session: Session, id_ente: int, esfera: str, nome: str, conhecidos: set[int]) -> bool:
+    """Inclui no cadastro um município, estado ou o DF que ainda não existe. Devolve False se o código é inválido."""
+    if id_ente in conhecidos:
+        return True
+    if esfera == "MUNICIPIO":
+        try:
+            garantir_municipio(session, id_ente, nome, conhecidos)
+        except ValueError:
+            return False
+        return True
+    try:
+        uf = uf_de(esfera, id_ente)
+    except ValueError:
+        return False
+    ente = Ente(id_ente=id_ente, esfera=esfera, uf=uf, nome=nome or f"Ente {id_ente}", capital=False,
+                tribunal_competente=tribunal_de(esfera, uf, id_ente))
+    session.add(ente)
+    session.flush()
+    registrar_codigos(session, [ente])
+    conhecidos.add(id_ente)
+    return True
+
+
 def existia_no_ano(ano: int, instalacao: int | None, extincao: int | None) -> bool:
     if instalacao is not None and ano < instalacao:
         return False

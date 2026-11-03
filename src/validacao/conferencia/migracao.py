@@ -148,6 +148,9 @@ def preparar(engine: Engine, usuario: str = "sistema") -> None:
     """Cria tabelas, catálogo e configuração (sem migrar dados)."""
     criar_estrutura(engine)
     with Session(engine) as session:
+        from validacao.catalogo import semear as semear_v1
+
+        semear_v1(session)  # fontes e componentes de referência (o cadastro de entes depende deles)
         semear_catalogo(session)
         garantir_conjunto(session, usuario)
         if configuracao(session, "versao_esquema") is None:
