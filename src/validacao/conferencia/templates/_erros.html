@@ -1,0 +1,8 @@
+{% set lista = r.erros if r is defined and r.erros is defined else relatorio.get('erros', []) %}
+<div style="overflow: auto; max-height: 420px">
+<table class="tabela-simples">
+  <thead><tr><th class="num">Linha</th><th>Coluna</th><th>Valor lido</th><th>Ocorrência</th></tr></thead>
+  <tbody>{% for e in lista[:1000] %}<tr><td class="num">{{ e.linha }}</td><td>{{ e.coluna }}</td><td class="mono">{{ e.valor }}</td><td>{{ e.erro }}</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% if lista|length > 1000 %}<p class="sutil">Mostrando 1.000 de {{ lista|length|milhar }} ocorrências.</p>{% endif %}

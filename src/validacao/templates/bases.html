@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Base liberada</h1>
+<p class="lede">A base só congela quando não houver bloco sem decisão, bloco em vermelho sem decisão nem confirmação exigida em aberto.</p>
+<div class="resumo">
+  <article class="metrica"><strong>{{ impedimentos.pendentes | inteiro }}</strong><span>blocos sem decisão</span></article>
+  <article class="metrica"><strong>{{ impedimentos.vermelhos | inteiro }}</strong><span>em vermelho sem decisão</span></article>
+  <article class="metrica"><a href="/revisao"><strong>{{ impedimentos.sem_revisao | inteiro }}</strong><span>sem a revisão exigida</span></a></article>
+</div>
+{% if usuario.perfil == "ADMINISTRADOR" %}
+  <form method="post" action="/bases/congelar">
+    <button type="submit" {% if impedimentos.pendentes or impedimentos.vermelhos or impedimentos.sem_revisao %}disabled{% endif %}>Congelar base</button>
+  </form>
+  <details>
+    <summary>Ajustar a fórmula</summary>
+    <p>Vigente: {{ formula.descricao }}.</p>
+    <form method="post" action="/formulas">
+      <label>Descrição <input name="descricao" value="Média aritmética por esfera" required></label>
+      <label>Fecha em <input name="fecha_em" value="1" required></label>
+      <label>Casas decimais <input name="casas" value="10" required></label>
+      <label>Fatores, um ano por linha (2024=1,05) <textarea name="fatores" rows="3"></textarea></label>
+      <label><input type="checkbox" name="incluir_simples"> Somar o ISS do Simples</label>
+      <label><input type="checkbox" name="incluir_compensacao"> Somar a compensação</label>
+      <fieldset>
+        <legend>Anos</legend>
+        {% for ano in anos %}
+          <label><input type="checkbox" name="anos" value="{{ ano }}" checked> {{ ano }}</label>
+        {% endfor %}
+      </fieldset>
+      <button class="secundario" type="submit">Gravar fórmula</button>
+    </form>
+  </details>
+{% endif %}
+<h2>Versões</h2>
+<div class="tabela">
+  <table>
+    <thead><tr><th>Versão</th><th>Data</th><th>Hash</th><th></th></tr></thead>
+    <tbody>
+      {% for versao in versoes %}
+        <tr>
+          <td><a href="/bases/{{ versao.id }}">{{ versao.id }}</a></td>
+          <td>{{ versao.data_congelamento }}</td>
+          <td class="mudo">{{ versao.hash }}</td>
+          <td><a href="/apuracao/{{ versao.id }}">Coeficientes</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4">Nenhuma base congelada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if versoes|length > 1 %}
+  <h2>Comparar</h2>
+  <form class="filtros" method="get" action="/comparar">
+    <label>Versão A <input name="a" required></label>
+    <label>Versão B <input name="b" required></label>
+    <button class="secundario" type="submit">Comparar coeficientes</button>
+  </form>
+{% endif %}
+{% endblock %}

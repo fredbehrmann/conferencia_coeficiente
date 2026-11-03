@@ -1,0 +1,25 @@
+<div style="overflow-x: auto">
+<table class="tabela-simples">
+  <thead><tr><th>Fonte</th><th>Campo</th><th>Parcela</th><th>Conceito</th><th class="num">Valor</th><th>Texto original</th><th>Estado</th><th>Versão</th><th>Lote</th><th>Procedência</th><th>Extração</th></tr></thead>
+  <tbody>
+  {% for r, lote in info.registros %}
+    {% set p = r.procedencia|json %}
+    <tr {% if not r.vigente %}style="opacity: .65"{% endif %}>
+      <td>{{ r.declaracao_id|sigla }}</td>
+      <td class="mono">{{ r.campo }}</td>
+      <td>{{ PARCELAS.get(r.parcela, r.parcela or '—') }}</td>
+      <td>{{ CONCEITOS.get(r.conceito, r.conceito or '—') }}</td>
+      <td class="num">{{ r.valor_centavos|reais2 if r.valor_centavos is not none else '—' }}</td>
+      <td class="mono">{{ r.valor_texto or '' }}</td>
+      <td>{{ ESTADOS.get(r.estado, r.estado) }}{% if r.duplicado %} · <b>duplicado ({{ r.duplicado|lower }})</b>{% endif %}</td>
+      <td>v{{ r.versao }} {% if r.vigente %}<span class="adotado-rotulo">vigente</span>{% else %}<span class="sutil">substituída</span>{% endif %}</td>
+      <td><a href="/importar/lote/{{ lote.id }}">{{ lote.id }}</a>{% if lote.ficticio %} <b>fictício</b>{% endif %}</td>
+      <td style="font-size: 11.5px">{{ p.arquivo or lote.arquivo|nome_arquivo }}{% if p.aba %} · {{ p.aba }}{% endif %}{% if p.linha %} · linha {{ p.linha }}{% endif %}{% if p.coluna %} · {{ p.coluna }}{% endif %}{% if p.natureza_informada %} · natureza "{{ p.natureza_informada }}"{% endif %}</td>
+      <td>{{ r.data_extracao|data }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="11" class="sutil">Nenhum registro.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

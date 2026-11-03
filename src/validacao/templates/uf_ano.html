@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Cota dos municípios de {{ uf }} em {{ ano }}</h1>
+<p class="lede">Compare a cota declarada por cada município com o valor sugerido. Abra o município para decidir.</p>
+<p><a href="/ente/{{ estado.id_ente }}">Abrir {{ estado.nome }}</a></p>
+<table>
+  <thead><tr><th>Município</th><th>Cota no SICONFI</th><th>Sugerida</th></tr></thead>
+  <tbody>
+    {% for linha, ente in linhas %}
+      <tr>
+        <td><a href="/ente/{{ ente.id_ente }}">{{ ente.nome }}</a></td>
+        <td>{{ linha.valor_referencia | reais }}</td>
+        <td>{{ linha.fonte_sugerida or "—" }} {{ linha.valor_sugerido | reais }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block titulo %}Cobertura{% endblock %}
+{% block conteudo %}
+<section class="bloco">
+  <form method="get" action="/cobertura" class="filtros-linha" style="float: right">
+    <select name="componente" onchange="this.form.submit()">{% for comp in componentes %}<option value="{{ comp.id }}" {{ 'selected' if comp.id == componente }}>{{ comp.nome }}</option>{% endfor %}</select>
+  </form>
+  <h2>Cobertura por fonte e exercício — {{ NOME_COMPONENTE.get(componente, componente) }}</h2>
+  <p class="sutil">Entes com registro vigente (valor ou zero declarado) em relação aos entes esperados no exercício. Esperados: entes do universo do componente (casos da última validação), exceto os fora do universo. Células vazias e formatos inválidos aparecem à parte.</p>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead><tr><th>Fonte</th>{% for a in c.exercicios %}<th class="num">{{ a }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for d in c.declaracoes %}
+      {% set linha = c.contagem.get(d.id, {}) %}
+      <tr><td><b>{{ d.sigla }}</b><div class="sutil" style="font-size: 11px">{{ d.sistema }}</div></td>
+      {% for a in c.exercicios %}
+        {% set e = linha.get(a, {}) %}
+        {% set com = (e.get('VALOR', 0) + e.get('ZERO', 0)) %}
+        {% set esp = c.esperados.get(a, 0) %}
+        {% set taxa = (com / esp) if esp else 0 %}
+        <td class="cob {{ 'baixa' if esp and taxa < 0.5 and com else ('media' if esp and taxa < 0.95 and com else '') }}">
+          {% if com %}<b>{{ '%.1f'|format(taxa * 100)|replace('.', ',') }}%</b><div class="sutil" style="font-size: 11px">{{ com|milhar }}{% if e.get('ZERO') %} · {{ e.ZERO|milhar }} zeros{% endif %}{% if e.get('AUSENTE') %} · {{ e.AUSENTE|milhar }} vazios{% endif %}{% if e.get('INVALIDO') %} · {{ e.INVALIDO|milhar }} inválidos{% endif %}</div>
+          <div class="barra" aria-hidden="true"><span style="width: {{ (taxa * 100)|round(1) }}%"></span></div>
+          {% else %}<span class="sutil">sem dados</span>{% endif %}
+        </td>
+      {% endfor %}</tr>
+    {% endfor %}
+      <tr><td class="sutil">Esperados</td>{% for a in c.exercicios %}<td class="num sutil">{{ c.esperados.get(a, 0)|milhar }}</td>{% endfor %}</tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="sutil" style="margin-top: 6px">Em 2026 a declaração principal ainda não é exigível; a falta de dados não é lacuna.</p>
+</section>
+<section class="bloco">
+  <h2>Lacunas da fonte principal por UF</h2>
+  <p class="sutil">Casos (ente × exercício) sem valor na fonte principal, em exercícios exigíveis. Clique para abrir na central.</p>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead><tr><th>UF</th>{% for a in c.exercicios %}<th class="num">{{ a }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for uf in c.por_uf|sort %}
+      <tr><td><b>{{ uf }}</b></td>
+      {% for a in c.exercicios %}{% set x = c.por_uf[uf].get(a) %}
+        <td class="num">{% if x and x.sem_principal %}<a href="/?enviado=1&uf={{ uf }}&exercicio={{ a }}&tipo=AUS&somente_alerta=1&componente={{ componente }}">{{ x.sem_principal }}</a> <span class="sutil">/ {{ x.total }}</span>{% elif x %}<span class="sutil">0 / {{ x.total }}</span>{% endif %}</td>
+      {% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Conferência{% endblock %} · Coeficiente de participação</title>
+  <link rel="stylesheet" href="/estatico/cf.css">
+</head>
+<body data-validando="{{ '1' if validacao and validacao.rodando else '0' }}">
+{% if demo %}<div class="faixa-demo">DADOS FICTÍCIOS — base de demonstração dos cenários de aceitação. Nenhum valor desta tela é real.</div>{% endif %}
+<header class="topo">
+  <div class="marca">
+    <h1>Conferência dos valores do coeficiente</h1>
+    <small>CGIBS · LC 227/2026, arts. 114 a 116 · qualidade dos dados de entrada</small>
+  </div>
+  {% if usuario %}
+  <nav class="abas" aria-label="Seções">
+    <a href="/visao" class="{{ 'ativa' if aba == 'visao' }}">Visão geral</a>
+    <a href="/" class="{{ 'ativa' if aba == 'central' }}">Central de inconsistências</a>
+    <a href="/recuperacao" class="{{ 'ativa' if aba == 'recuperacao' }}">Recuperação de dados</a>
+    <a href="/resultado" class="{{ 'ativa' if aba == 'resultado' }}">Resultado</a>
+    <a href="/importar" class="{{ 'ativa' if aba == 'importar' }}">Importar</a>
+    <span class="sep" aria-hidden="true"></span>
+    <a href="/dados" class="{{ 'ativa' if aba == 'dados' }}">Dados brutos</a>
+    <a href="/cobertura" class="{{ 'ativa' if aba == 'cobertura' }}">Cobertura</a>
+    <a href="/regras" class="{{ 'ativa' if aba == 'regras' }}">Regras</a>
+    <a href="/fontes" class="{{ 'ativa' if aba == 'fontes' }}">Fontes e metodologia</a>
+  </nav>
+  <div class="usuario">
+    <span>{{ usuario.nome }} · {{ usuario.perfil|lower }}</span>
+    <form method="post" action="/sair"><button class="discreto pequeno" type="submit">Sair</button></form>
+  </div>
+  {% endif %}
+</header>
+{% if usuario %}
+<div class="execucao">
+  {% if execucao_atual %}
+  <span>Validação nº <b>{{ execucao_atual.id }}</b> em {{ execucao_atual.concluida_em|datahora }}</span>
+  <span>Data de corte <b>{{ execucao_atual.data_corte|data }}</b></span>
+  <span>Regras: versão <b>{{ execucao_atual.conjunto_id }}</b></span>
+  <span>{{ execucao_atual.casos|milhar }} casos · {{ execucao_atual.alertas|milhar }} alertas</span>
+  {% else %}
+  <span><b>Nenhuma validação executada.</b> Importe dados ou execute a validação.</span>
+  {% endif %}
+  <button class="pequeno" data-validar type="button" title="Aplica a versão vigente das regras aos registros atuais">Executar validação</button>
+  <span id="estado-validacao" role="status" aria-live="polite">{% if validacao and validacao.rodando %}Validando…{% endif %}</span>
+</div>
+{% endif %}
+<main>
+  {% if aviso %}<div class="aviso" role="status">{{ aviso }}</div>{% endif %}
+  {% if erro %}<div class="erro" role="alert">{{ erro }}</div>{% endif %}
+  {% block conteudo %}{% endblock %}
+</main>
+{% block depois %}{% endblock %}
+<script src="/estatico/cf.js"></script>
+</body>
+</html>

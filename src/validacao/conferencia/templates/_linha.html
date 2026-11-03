@@ -1,0 +1,50 @@
+{% from "_macros.html" import celula_valor, chips, situacao, selo_confianca %}
+{%- set c = l.caso -%}
+{%- set d = l.decisao -%}
+{%- set vals = l.valores -%}
+{%- set pv = vals.get(c.declaracao_principal) if c.declaracao_principal else None -%}
+{%- set resumo = c.alertas_resumo|json -%}
+<tr data-caso="{{ c.id }}">
+  <td class="fixa f1"><button class="discreto pequeno" data-expandir aria-expanded="false" aria-label="Ver registros por fonte e versão" title="Ver registros por fonte e versão">▸</button></td>
+  <td class="fixa f2"><span class="ente-nome" title="{{ c.nome_ente }}">{{ c.nome_ente }}</span><span class="ente-meta">{{ 'Município' if c.esfera == 'MUNICIPIO' else c.esfera|capitalize }}</span></td>
+  <td class="fixa f3 mono">{{ c.id_ente }}</td>
+  <td class="fixa f4">{{ c.uf }}</td>
+  <td class="fixa f5 num"><b>{{ c.exercicio }}</b>{% if c.situacao_exercicio == 'NAO_EXIGIVEL' %}<span class="valor-meta" title="Declaração ainda não exigível na data de corte">não exigível</span>{% endif %}</td>
+  <td title="{{ NOME_COMPONENTE.get(c.componente_id, c.componente_id) }}">{{ ROTULO_CURTO.get(c.componente_id, c.componente_id) }}</td>
+  <td class="fonte {{ 'cel-alerta g' ~ pv.gravidade if pv and pv.alertas }}">
+    {%- if pv -%}
+      {{ celula_valor(pv, true) }}<span class="valor-meta">{{ c.declaracao_principal|sigla }}{% if c.declaracao_principal != principal_padrao %} · substituta{% endif %}</span>
+      {%- if c.diagnostico == 'SEM_VALIDACAO' %}<span class="sem-validacao" title="Nenhuma fonte independente comparável">sem validação suficiente</span>{% endif -%}
+    {%- elif c.estado_principal == 'NAO_EXIGIVEL' -%}<span class="estado" title="A declaração deste exercício ainda não é exigível">não exigível</span>
+    {%- elif c.estado_principal == 'NAO_APLICAVEL' -%}<span class="estado">não aplicável</span>
+    {%- else -%}<span class="estado" style="border-color: var(--g4); color: var(--g4)" title="Sem valor na fonte principal">{{ 'célula vazia' if c.estado_principal == 'AUSENTE' and vals.get(principal_padrao) else 'sem registro' }}</span>{% if vals.get(principal_padrao) and vals.get(principal_padrao).estado == 'INVALIDO' %}<span class="valor-meta">formato inválido</span>{% endif %}
+    {%- endif -%}
+  </td>
+  {%- for col in filtros.colunas %}
+  {%- set v = vals.get(col) -%}
+  {%- if col != c.declaracao_principal %}
+  <td class="fonte {{ 'cel-alerta g' ~ v.gravidade if v and v.alertas }}" {% if v and v.alertas %}title="Envolvida em: {% for r in v.alertas %}{{ REGRAS[r].nome }}{{ ', ' if not loop.last }}{% endfor %}"{% endif %}>{{ celula_valor(v) }}</td>
+  {%- else %}
+  <td class="fonte ref-col" title="Esta fonte é a referência deste caso">{{ celula_valor(v, true) }}{% if v %}<span class="valor-meta">referência</span>{% endif %}</td>
+  {%- endif %}
+  {%- endfor %}
+  <td class="num">
+    {%- if c.maior_dif_abs is not none -%}
+      <span class="valor">{{ c.maior_dif_abs|reais }}</span>
+      <span class="valor-meta">{{ c.maior_dif_pct|pct if c.maior_dif_pct is not none else '% não calculável' }} · {{ (c.par_maior or '').split('×')|map('sigla')|join(' × ') }}</span>
+    {%- else -%}<span class="sutil">—</span>{%- endif -%}
+  </td>
+  <td style="min-width: 190px">{{ chips(resumo) }}{% if not resumo %}<span class="sutil">{{ DIAGNOSTICOS.get(c.diagnostico, c.diagnostico) }}</span>{% endif %}</td>
+  <td>{{ situacao(l.situacao) }}</td>
+  <td>{{ selo_confianca(c.confianca, c.confianca_motivo, l.situacao) }}</td>
+  <td class="num">
+    {%- if d and d.vigente and d.valor_adotado is not none -%}
+      <span class="adotado-rotulo">Adotado</span><span class="valor">{{ d.valor_adotado|reais }}</span><span class="valor-meta">{{ 'correção' if d.declaracao_adotada == 'CORRECAO' else (d.declaracao_adotada|sigla) }}</span>
+    {%- elif d and not d.elegivel -%}
+      <span class="inelegivel">Desconsiderado</span>
+    {%- elif c.valor_proposto is not none -%}
+      <span class="proposto-rotulo">Proposto</span><span class="valor">{{ c.valor_proposto|reais }}</span><span class="valor-meta">{{ c.declaracao_proposta|sigla }}</span>
+    {%- else -%}<span class="sutil" title="{{ c.motivo_proposta }}">sem proposta</span>{%- endif -%}
+  </td>
+  <td><button class="primario pequeno" data-analisar="{{ c.id }}">Analisar</button></td>
+</tr>

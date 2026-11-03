@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block titulo %}Importação concluída{% endblock %}
+{% block conteudo %}
+<section class="bloco">
+  <h2>{{ 'Conteúdo já importado' if r.situacao == 'JA_IMPORTADO' else 'Importação concluída' }}</h2>
+  <p>{{ r.mensagem }}</p>
+  {% if r.situacao != 'JA_IMPORTADO' %}
+  <div class="indicadores" style="max-width: 760px">
+    <div class="indicador"><b>{{ r.lidos|milhar }}</b><span>valores lidos</span></div>
+    <div class="indicador"><b>{{ r.novos|milhar }}</b><span>registros novos</span></div>
+    <div class="indicador"><b>{{ r.novas_versoes|milhar }}</b><span>novas versões (retificações)</span></div>
+    <div class="indicador"><b>{{ r.repetidos|milhar }}</b><span>iguais aos vigentes</span></div>
+    <div class="indicador {{ 'destaque' if r.erros }}"><b>{{ r.erros|length|milhar }}</b><span>ocorrências</span></div>
+  </div>
+  <p>Os alertas e a central só refletem este lote depois de uma nova validação.</p>
+  <button class="primario" data-validar type="button">Executar validação agora</button>
+  <a class="botao" href="/importar/lote/{{ r.lote }}">Ver relatório do lote</a>
+  {% endif %}
+  <a class="botao discreto" href="/importar">Importar outro arquivo</a>
+</section>
+{% if r.erros %}
+<section class="bloco">
+  <h2>Relatório de ocorrências</h2>
+  {% include "_erros.html" %}
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block titulo %}Importar — mapeamento{% endblock %}
+{% block conteudo %}
+<form method="post" action="/importar/mapear">
+<input type="hidden" name="token" value="{{ token }}">
+<section class="bloco">
+  <h2>2. Prévia de “{{ planilha.nome_arquivo }}”</h2>
+  <div class="filtros-linha">
+    <div class="campo"><label for="aba">Aba</label><select id="aba" name="aba">{% for nome in planilha.abas %}<option {{ 'selected' if nome == aba_sel }}>{{ nome }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="cab">Linha do cabeçalho</label><input id="cab" name="linha_cabecalho" type="number" min="1" value="{{ cabecalho }}" style="width: 90px"></div>
+    <button type="submit" name="acao" value="previa">Atualizar prévia</button>
+    <span class="sutil">{{ previa.total_linhas|milhar }} linhas de dados abaixo do cabeçalho.</span>
+  </div>
+  <div style="overflow-x: auto; margin-top: 10px; max-height: 320px">
+  <table class="tabela-simples">
+    <thead><tr><th>Linha</th>{% for c in previa.colunas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for l in previa.linhas %}<tr><td class="sutil">{{ l.linha }}</td>{% for v in l.valores %}<td class="mono">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</section>
+
+<section class="bloco">
+  <h2>3. O que é cada coluna</h2>
+  <div class="grade-form">
+    <div class="campo"><label for="decl">Declaração / fonte</label><select id="decl" name="declaracao" required>{% for d in declaracoes %}<option value="{{ d.id }}" {{ 'selected' if v.get('declaracao') == d.id }}>{{ d.sigla }} — {{ d.sistema }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="comp">Componente</label><select id="comp" name="componente">{% for c in componentes %}<option value="{{ c.id }}" {{ 'selected' if v.get('componente', 'ISS_MUN') == c.id }}>{{ c.nome }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="ente">Coluna do código IBGE</label><select id="ente" name="coluna_ente" required><option value=""></option>{% for c in previa.colunas %}<option {{ 'selected' if v.get('coluna_ente') == c }}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="ex">Coluna do exercício</label><select id="ex" name="coluna_exercicio"><option value="">(exercício fixo)</option>{% for c in previa.colunas %}<option {{ 'selected' if v.get('coluna_exercicio') == c }}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="exf">Exercício fixo (se não houver coluna)</label><input id="exf" name="exercicio_fixo" type="number" value="{{ v.get('exercicio_fixo', '') }}"></div>
+    <div class="campo"><label for="per">Período</label><select id="per" name="periodo"><option value="ANUAL">Anual (exercício encerrado)</option><option value="PARCIAL" {{ 'selected' if v.get('periodo') == 'PARCIAL' }}>Parcial (bimestre, quadrimestre)</option></select></div>
+    <div class="campo"><label for="esc">Escala dos valores</label><select id="esc" name="escala"><option value="1">Reais</option><option value="1000" {{ 'selected' if v.get('escala') == '1000' }}>Milhares de reais</option></select></div>
+    <div class="campo"><label for="dt">Data da extração</label><input id="dt" name="data_extracao" type="date" value="{{ v.get('data_extracao', '') }}"></div>
+  </div>
+  <h3 style="margin-top: 14px">Colunas de valor</h3>
+  <p class="sutil">Para cada coluna, informe o campo (nome estável usado nas versões), a parcela e o conceito. O conceito define a comparabilidade: valores brutos e líquidos não são comparados diretamente.</p>
+  <table class="tabela-simples">
+    <thead><tr><th>Coluna do arquivo</th><th>Campo</th><th>Parcela</th><th>Conceito</th></tr></thead>
+    <tbody>
+    {% for i in range(1, 7) %}
+      <tr>
+        <td><select name="valor_coluna_{{ i }}"><option value=""></option>{% for c in previa.colunas %}<option {{ 'selected' if v.get('valor_coluna_' ~ i) == c }}>{{ c }}</option>{% endfor %}</select></td>
+        <td><input name="valor_campo_{{ i }}" value="{{ v.get('valor_campo_' ~ i, '') }}" placeholder="ex.: ISS_TOTAL"></td>
+        <td><select name="valor_parcela_{{ i }}">{% for codigo, rotulo in PARCELAS.items() %}<option value="{{ codigo }}" {{ 'selected' if v.get('valor_parcela_' ~ i, 'TOTAL') == codigo }}>{{ rotulo }}</option>{% endfor %}</select></td>
+        <td><select name="valor_conceito_{{ i }}">{% for codigo, rotulo in CONCEITOS.items() %}<option value="{{ codigo }}" {{ 'selected' if v.get('valor_conceito_' ~ i, 'INDEFINIDO') == codigo }}>{{ rotulo }}</option>{% endfor %}</select></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <details style="margin-top: 10px"><summary>Conceito informado linha a linha (opcional)</summary>
+    <div class="grade-form" style="margin-top: 8px">
+      <div class="campo"><label for="cc">Coluna com o conceito</label><select id="cc" name="coluna_conceito"><option value=""></option>{% for c in previa.colunas %}<option {{ 'selected' if v.get('coluna_conceito') == c }}>{{ c }}</option>{% endfor %}</select></div>
+      <div class="campo" style="grid-column: span 2"><label for="ct">Tradução (texto = LIQUIDO, BRUTO ou INDEFINIDO, uma por linha)</label><textarea id="ct" name="conceitos_por_texto">{{ v.get('conceitos_por_texto', '') }}</textarea></div>
+    </div>
+  </details>
+  <div class="campo" style="margin-top: 10px"><label for="obs">Observação do lote</label><input id="obs" name="observacao" value="{{ v.get('observacao', '') }}" style="width: 100%"></div>
+  <div style="margin-top: 12px; display: flex; gap: 10px">
+    <button class="primario" type="submit" name="acao" value="confirmar">Validar e importar</button>
+    <a class="botao discreto" href="/importar">Cancelar</a>
+  </div>
+</section>
+</form>
+{% endblock %}

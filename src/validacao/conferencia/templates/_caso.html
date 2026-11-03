@@ -1,0 +1,252 @@
+{% from "_macros.html" import situacao as sit_macro, gravidade_chip, selo_confianca %}
+{% set c = caso %}
+{% set vals = info.valores %}
+{% set ente = info.ente %}
+<div class="caso-cabeca">
+  <div>
+    <h2 style="font-size: 17px; margin-bottom: 2px">{{ c.nome_ente }} <span class="sutil" style="font-weight: 400">· {{ c.uf }}</span></h2>
+    <div class="meta">IBGE <span class="mono">{{ c.id_ente }}</span> · Exercício <b>{{ c.exercicio }}</b> · {{ componente.nome if componente else c.componente_id }}{% if ente and ente.capital %} · capital{% endif %}</div>
+    <div class="sutil" style="font-size: 11.5px">{{ componente.fundamento if componente }}</div>
+  </div>
+  <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+    <span class="sutil">Diagnóstico:</span> <b>{{ DIAGNOSTICOS.get(c.diagnostico, c.diagnostico) }}</b>
+    {% if c.gravidade_max %}{{ gravidade_chip(c.gravidade_max) }}{% endif %}
+    <span class="sutil">· Análise:</span> {{ sit_macro(situacao) }}
+    <a class="botao pequeno discreto" href="/caso/{{ c.id }}" target="_blank" rel="noopener" title="Abrir em página própria">↗ Página</a>
+  </div>
+</div>
+
+<div class="confianca-caso">
+  <span class="sutil">Confiança no valor principal:</span> {{ selo_confianca(c.confianca, c.confianca_motivo, situacao) }}
+  <span class="motivo">{{ c.confianca_motivo }}</span>
+</div>
+
+{% if situacao == 'REANALISE' %}
+<div class="erro" role="alert"><b>Reanálise necessária.</b> As evidências mudaram depois da última decisão (novo valor, retificação ou nova fonte). A decisão anterior continua registrada abaixo, com os valores que foram analisados.</div>
+{% endif %}
+
+<section class="bloco" aria-label="Valores do caso">
+  <div class="resumo-valores">
+    <div class="item">
+      <span>Valor principal ({{ c.declaracao_principal|sigla if c.declaracao_principal else principal_padrao|sigla }})</span>
+      <b>{{ c.valor_principal|reais2 if c.valor_principal is not none else '—' }}</b>
+      <span>{% if c.valor_principal is none %}{{ ESTADOS.get(c.estado_principal, c.estado_principal) }}{% else %}conceito {{ CONCEITOS.get(config.selecao[c.componente_id].conceito_referencia, '')|lower if config.selecao and config.selecao.get(c.componente_id) else '' }}{% endif %}</span>
+    </div>
+    <div class="item prop">
+      <span>Valor proposto</span>
+      <b>{{ c.valor_proposto|reais2 if c.valor_proposto is not none else 'Sem proposta' }}</b>
+      <span>{{ c.motivo_proposta }}</span>
+    </div>
+    <div class="item adot">
+      <span>Valor adotado</span>
+      {% if decisao and not decisao.elegivel %}<b class="inelegivel">Desconsiderado</b><span>Inelegível para a apuração por decisão de {{ decisao.usuario }} em {{ decisao.criado_em|datahora }}. O registro original é preservado.</span>
+      {% elif decisao and decisao.valor_adotado is not none %}<b>{{ decisao.valor_adotado|reais2 }}</b><span>{{ 'correção documentada' if decisao.declaracao_adotada == 'CORRECAO' else 'fonte ' ~ (decisao.declaracao_adotada|sigla) }} · {{ ACOES[decisao.acao].rotulo|lower }} · {{ decisao.usuario }}, {{ decisao.criado_em|datahora }}</span>
+      {% elif decisao %}<b>Nenhum</b><span>Decisão atual: {{ ACOES[decisao.acao].rotulo|lower }} ({{ decisao.usuario }}, {{ decisao.criado_em|datahora }}). Ainda não define valor.</span>
+      {% else %}<b>Nenhum</b><span>Sem decisão registrada.</span>{% endif %}
+    </div>
+    <div class="item">
+      <span>Elegibilidade</span>
+      {% if decisao and not decisao.elegivel %}<b class="inelegivel">Inelegível</b><span>Desconsiderado após análise.</span>
+      {% elif c.gravidade_max >= 3 and not (decisao and decisao.situacao_analise in ('ESCLARECIDO', 'AJUSTADO') and situacao != 'REANALISE') %}<b>Aguardando análise</b><span>Há alerta de gravidade média ou alta sem conclusão. O valor original continua visível.</span>
+      {% elif c.valor_principal is none and not (decisao and decisao.valor_adotado is not none) %}<b>Sem valor elegível</b><span>Depende da metodologia aplicável.</span>
+      {% else %}<b>Elegível</b><span>Sem impedimento registrado.</span>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="bloco" aria-label="Alertas">
+  <h3>Por que há alerta</h3>
+  {% for a in info.alertas %}
+    {% set r = REGRAS[a.regra] %}
+    {% set ev = a.evidencias|json %}
+    <div class="alerta-item">
+      <div class="alerta-icone {{ GRAVIDADE_CLASSE[a.gravidade] }}" aria-hidden="true">{{ GRAVIDADE_ICONE[a.gravidade] }}</div>
+      <div>
+        <div class="alerta-titulo">{{ r.nome }} <span class="chip {{ GRAVIDADE_CLASSE[a.gravidade] }}">{{ GRAVIDADES[a.gravidade] }}</span>
+          {% if a.declaracao_b %}<span class="sutil" style="font-weight: 400">· par {{ a.declaracao_b|sigla }} × {{ a.declaracao_a|sigla }}</span>{% endif %}</div>
+        <p style="margin: 3px 0 2px">{{ a.mensagem }}</p>
+        {% if a.dif_abs is not none %}<div class="sutil num" style="text-align: left">Diferença assinada {{ a.dif_assinada|reais2 }} · absoluta {{ a.dif_abs|reais2 }} · percentual {{ a.dif_pct|pct(2) }}</div>{% endif %}
+        {% set dados = dados_alertas.get(a.id) if dados_alertas else none %}
+        {% if dados %}
+        <details class="dados-alerta" {{ 'open' if loop.first or a.regra in ('REE', 'REP', 'VAR', 'ESC', 'UFC', 'TOT', 'DUP', 'RET') }}><summary>Ver os dados que geraram o alerta{% if dados.linhas %} ({{ dados.linhas|length }} linha{{ 's' if dados.linhas|length != 1 }}){% endif %}</summary>
+          <div class="dados-alerta-corpo">
+            <div class="dados-titulo">{{ dados.titulo }}</div>
+            {% if dados.nota %}<p class="sutil" style="margin: 2px 0 6px">{{ dados.nota }}</p>{% endif %}
+            {% if dados.linhas %}
+            <div class="dados-quadro"><table class="tabela-simples compacta">
+              <thead><tr>{% for rotulo, classe in dados.colunas %}<th class="{{ classe }}">{{ rotulo }}</th>{% endfor %}{% if dados.linhas|selectattr('caso')|list %}<th></th>{% endif %}</tr></thead>
+              <tbody>{% set tem_caso = dados.linhas|selectattr('caso')|list %}{% for l in dados.linhas %}<tr class="{{ 'destaque' if l.destaque }}">{% for cel in l.celulas %}<td class="{{ dados.colunas[loop.index0][1] if dados.colunas|length > loop.index0 }}">{{ cel }}</td>{% endfor %}{% if tem_caso %}<td>{% if l.caso %}<a href="#" class="botao pequeno discreto" data-analisar="{{ l.caso }}" title="Abrir a análise deste caso">Abrir</a>{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody>
+            </table></div>
+            {% endif %}
+            {% if dados.rodape %}<p class="sutil" style="margin-top: 4px">{{ dados.rodape }}</p>{% endif %}
+          </div>
+        </details>
+        {% endif %}
+        <details><summary>Regra, fórmula e parâmetros</summary>
+          <div class="regra-det">
+            <div><b>Objetivo:</b> {{ r.objetivo }}</div>
+            <div><b>Aplica-se a:</b> {{ r.aplicacao }}</div>
+            <div><b>Fórmula:</b> <code>{{ r.formula }}</code></div>
+            <div><b>Parâmetros ({{ 'hipótese de trabalho' }}):</b> {% for k, v in (ev.parametros or {}).items() %}<code>{{ k }} = {{ v }}</code>{{ '; ' if not loop.last }}{% else %}nenhum{% endfor %}</div>
+            <div><b>Base de cálculo:</b> {{ r.base }} · regras versão {{ execucao.conjunto_id if execucao }} · execução {{ c.execucao_id }}</div>
+          </div>
+        </details>
+      </div>
+    </div>
+  {% else %}
+    <p class="sutil">Nenhum alerta. {% if c.diagnostico == 'CONFERIDO' %}A referência foi conferida com {{ c.comparadores }} fonte(s) independente(s) dentro das tolerâncias.{% endif %}</p>
+  {% endfor %}
+</section>
+
+<section class="bloco" aria-label="Valores por fonte">
+  <h3>Valores por fonte — {{ c.exercicio }}</h3>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead><tr><th>Fonte</th><th title="Conceito declarado pela fonte para o valor total">Conceito</th><th class="num">Valor original</th><th class="num">Valor normalizado</th><th class="num">Diferença R$</th><th class="num">Diferença %</th><th>Comparabilidade</th><th>Versão e procedência</th></tr></thead>
+    <tbody>
+    {% for d in ordem if d in vals %}
+      {% set v = vals[d] %}
+      {% set decl = declaracoes.get(d) %}
+      <tr class="{{ 'ref' if v.comparabilidade == 'REFERENCIA' }}">
+        <td><b>{{ d|sigla }}</b><div class="sutil" style="font-size: 11px">{{ decl.sistema if decl }}{% if decl and decl.grupo_independencia == 'SICONFI' %} · mesmo declarante{% endif %}</div>
+          {% if composicoes and composicoes.get(d) %}<button type="button" class="discreto pequeno ver-composicao" data-composicao="comp-{{ c.id }}-{{ d }}" aria-expanded="false" aria-controls="comp-{{ c.id }}-{{ d }}">▸ composição</button>{% endif %}</td>
+        <td title="{{ CONCEITOS.get(v.conceito, '') }}">{{ {'LIQUIDO': 'Líquido', 'BRUTO': 'Bruto', 'INDEFINIDO': 'Não informado'}.get(v.conceito, v.conceito or '—') }}</td>
+        <td class="num {{ 'alvo' if v.alertas }}">{% if v.estado in ('VALOR', 'ZERO') %}{{ v.original|reais2 }}{% if v.estado == 'ZERO' %}<div class="estado zero">zero declarado</div>{% endif %}{% else %}<span class="estado">{{ ESTADOS.get(v.estado, v.estado) }}</span>{% endif %}</td>
+        <td class="num">{% if v.normalizado is not none %}{{ v.normalizado|reais2 }}{% if v.derivacao and v.derivacao != 'valor declarado' %}<div class="sutil" style="font-size: 11px; white-space: normal; max-width: 220px; text-align: right">{{ v.derivacao }}</div>{% endif %}{% else %}—{% endif %}</td>
+        <td class="num">{{ v.assinada|reais2 if v.assinada is not none else '—' }}</td>
+        <td class="num">{% if v.comparabilidade in ('SIM', 'RESSALVA') %}{{ v.percentual|pcts(2) }}{% else %}—{% endif %}</td>
+        <td><span class="comp {{ COMPARABILIDADE.get(v.comparabilidade, ('', 'vazio'))[1] }}">{{ COMPARABILIDADE.get(v.comparabilidade, (v.comparabilidade,))[0] }}</span>
+          {% if v.parcela %}<div class="sutil" style="font-size: 11px">parcela: {{ v.parcela }}</div>{% endif %}
+          {% if v.motivo %}<div class="sutil" style="font-size: 11px; max-width: 260px">{{ v.motivo }}</div>{% endif %}</td>
+        <td style="font-size: 11.5px">
+          {% for r, lote in info.registros if r.declaracao_id == d and r.id == v.registro %}
+            {% set p = r.procedencia|json %}
+            v{{ r.versao }} · lote {{ lote.id }}{% if lote.ficticio %} <b>(fictício)</b>{% endif %}<br>
+            <span class="sutil">{{ p.arquivo or lote.arquivo|nome_arquivo }}{% if p.aba %} · aba {{ p.aba }}{% endif %}{% if p.linha %} · linha {{ p.linha }}{% endif %}{% if p.coluna %} · coluna {{ p.coluna }}{% endif %}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% if composicoes and composicoes.get(d) %}
+      <tr class="linha-composicao" id="comp-{{ c.id }}-{{ d }}" hidden><td colspan="8">{% with comp = composicoes[d] %}{% include "_composicao.html" %}{% endwith %}</td></tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if not vals %}<p class="sutil">Nenhuma fonte informa valor neste exercício.</p>{% endif %}
+</section>
+
+<section class="bloco" aria-label="Histórico por exercício">
+  <h3>Série {{ EXERCICIOS[0] }}–{{ EXERCICIOS[-1] }} por fonte</h3>
+  {% if grafico %}
+  <div class="legenda">{% for nome, cor, traco in legenda %}<span><i style="border-color: {{ cor }}; {% if traco %}border-top-style: dashed;{% endif %}"></i>{{ nome }}</span>{% endfor %}</div>
+  {{ grafico|safe }}
+  {% endif %}
+  <div style="overflow-x: auto; margin-top: 8px">
+  <table class="tabela-simples matriz">
+    <thead><tr><th>Fonte</th>{% for a in EXERCICIOS %}<th class="num {{ 'atual' if a == c.exercicio }}">{{ a }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for d in ordem %}
+      <tr><td><b>{{ d|sigla }}</b></td>
+      {% for a in EXERCICIOS %}
+        {% set v = info.matriz[d].get(a) %}
+        <td class="num {{ 'atual' if a == c.exercicio }} {{ 'alertado' if v and v.alertas }}" {% if v and v.alertas %}title="{% for r in v.alertas %}{{ REGRAS[r].nome }}{{ ', ' if not loop.last }}{% endfor %}"{% endif %}>
+          {% if not v %}<span class="sutil">—</span>{% elif v.estado in ('VALOR', 'ZERO') %}{{ v.original|reais }}{% if v.alertas %} <span class="marca-alerta">⚠</span>{% endif %}{% else %}<span class="estado">{{ ESTADOS.get(v.estado, v.estado)|lower }}</span>{% endif %}
+        </td>
+      {% endfor %}</tr>
+    {% endfor %}
+      <tr><td><b>Adotado</b></td>
+      {% for a in EXERCICIOS %}{% set dd = info.decisoes_serie.get(a) %}
+        <td class="num {{ 'atual' if a == c.exercicio }}">{% if dd and not dd.elegivel %}<span class="inelegivel">desc.</span>{% elif dd and dd.valor_adotado is not none %}{{ dd.valor_adotado|reais }}{% else %}<span class="sutil">—</span>{% endif %}</td>
+      {% endfor %}</tr>
+      <tr><td><b>Situação</b></td>
+      {% for a in EXERCICIOS %}{% set sc = info.serie.get(a) %}
+        <td class="num {{ 'atual' if a == c.exercicio }}" style="font-size: 11px">{% if sc %}{% if sc.id == c.id %}<b>este caso</b>{% else %}<a href="#" data-analisar="{{ sc.id }}" title="Abrir {{ a }}">{{ DIAGNOSTICOS.get(sc.diagnostico, '')|replace('Conferido sem alerta', 'sem alerta') }}</a>{% endif %}{% endif %}</td>
+      {% endfor %}</tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="sutil" style="margin-top: 6px">Valores originais em R$. Sublinhado laranja: valor envolvido em alerta naquele exercício. A tabela é a versão textual do gráfico.</p>
+</section>
+
+{% if detalhes and (detalhes.get('rreo') or detalhes.get('msc')) or consultas_caso %}
+<section class="bloco" aria-label="Detalhes do RREO e da MSC">
+  <h3>RREO e MSC — linhas de origem</h3>
+  {% if consultas_caso %}<p class="sutil" style="margin-bottom: 6px">Consultas do pacote: {% for c in consultas_caso %}{{ c.fonte }} {% if c.ok %}<span class="comp ok">ok</span>{% elif c.ok is sameas false %}<span class="comp nao" title="{{ c.erro or c.detalhe }}">falhou</span>{% else %}<span class="comp vazio">?</span>{% endif %} ({{ c.linhas_retidas or 0 }} linhas retidas, {{ c.atualizado_em }}){{ '; ' if not loop.last }}{% endfor %}</p>{% endif %}
+  {% if detalhes.get('rreo') %}
+  <details open><summary>RREO ({{ detalhes.rreo|length }} linha{{ 's' if detalhes.rreo|length != 1 }})</summary>
+    <div style="overflow-x: auto"><table class="tabela-simples">
+      <thead><tr><th>Linha</th><th>Conta</th><th>Coluna</th><th>Anexo</th><th class="num">Valor</th><th>Instituição</th></tr></thead>
+      <tbody>{% for l in detalhes.rreo %}<tr><td class="num">{{ l.linha_arquivo }}</td><td><span class="mono">{{ l.cod_conta }}</span><div class="sutil" style="font-size: 11px">{{ l.conta }}</div></td><td>{{ l.coluna }}</td><td>{{ l.anexo }}</td><td class="num">{{ l.valor }}</td><td style="font-size: 11.5px">{{ l.instituicao }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% endif %}
+  {% if detalhes.get('msc') %}
+  <details><summary>MSC ({{ detalhes.msc|length }} lançamento{{ 's' if detalhes.msc|length != 1 }}, soma de valor_sinalizado)</summary>
+    <div style="overflow-x: auto"><table class="tabela-simples">
+      <thead><tr><th>Natureza da receita</th><th>Conta</th><th>D/C</th><th class="num">Valor</th><th class="num">Mult.</th><th class="num">Sinalizado</th><th>Poder/órgão</th><th>Fonte de recursos</th><th>Tipo</th></tr></thead>
+      <tbody>{% for l in detalhes.msc %}<tr><td class="mono">{{ l.natureza_receita }}</td><td class="mono">{{ l.conta_contabil }}</td><td>{{ l.natureza_conta }}</td><td class="num">{{ l.valor }}</td><td class="num">{{ l.multiplicador }}</td><td class="num">{{ l.valor_sinalizado }}</td><td>{{ l.poder_orgao }}</td><td>{{ l.fonte_recursos }}{% if l.complemento_fonte %}/{{ l.complemento_fonte }}{% endif %}</td><td>{{ l.tipo_valor }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="bloco" aria-label="Registros e versões">
+  <details>
+    <summary>Registros por fonte e versão ({{ info.registros|length }}) — inclui parcelas, versões substituídas e duplicidades</summary>
+    {% include "_registros_tabela.html" %}
+  </details>
+</section>
+
+<section class="bloco" aria-label="Histórico das decisões">
+  <h3>Histórico de análises e decisões</h3>
+  {% for h in historico %}
+    <div class="historico-item {{ 'vigente' if h.vigente }}">
+      <div><b>{{ ACOES.get(h.acao, {}).get('rotulo', h.acao) }}</b> · {{ SITUACOES.get(h.situacao_analise, (h.situacao_analise,))[0] }}{% if h.vigente %} · <span class="adotado-rotulo">vigente</span>{% else %} · <span class="sutil">substituída</span>{% endif %}{% if h.origem == 'MIGRADA_V1' %} · <span class="hipotese">migrada da versão 1</span>{% endif %}</div>
+      <div class="sutil">{{ h.usuario }} · {{ h.criado_em|datahora }} · execução {{ h.execucao_id or '—' }} · regras v{{ h.conjunto_id or '—' }}</div>
+      <div>Valor anterior {{ h.valor_anterior|reais2 if h.valor_anterior is not none else '—' }} → adotado {% if not h.elegivel %}<span class="inelegivel">desconsiderado</span>{% else %}{{ h.valor_adotado|reais2 if h.valor_adotado is not none else '—' }}{% endif %}{% if h.declaracao_adotada %} ({{ 'correção' if h.declaracao_adotada == 'CORRECAO' else h.declaracao_adotada|sigla }}){% endif %}</div>
+      {% if h.justificativa %}<div class="nota">{{ h.justificativa }}</div>{% endif %}
+      {% if h.evidencias %}<div class="sutil">Evidências: {{ h.evidencias }}</div>{% endif %}
+      {% set an = h.registros_analisados|json %}
+      {% if an and not an.get('cargas_legadas') %}<details><summary>Valores analisados nesta decisão</summary><div class="regra-det">{% for dd, item in an.items() %}{{ dd|sigla }}: {{ item.original|reais2 if item.original is not none else item.estado }} (registro {{ item.registro }}, versão {{ item.versao }}){{ '; ' if not loop.last }}{% endfor %}</div></details>{% endif %}
+    </div>
+  {% else %}
+    <p class="sutil">Nenhuma decisão registrada para este caso.</p>
+  {% endfor %}
+</section>
+
+<section class="bloco" aria-label="Registrar conclusão">
+  <h3>Registrar conclusão</h3>
+  <form class="decisao-form" method="post" action="/caso/{{ c.id }}/decidir" data-caso="{{ c.id }}">
+    <div class="acoes-lista" role="radiogroup" aria-label="Conclusão">
+      {% for codigo, acao in ACOES.items() %}
+        {% set desabilitada = (codigo in ('MANTER_PRINCIPAL', 'DIFERENCA_CONCEITO') and c.valor_principal is none) or (codigo == 'ADOTAR_FONTE' and not totais_vigentes) %}
+        <label class="acao" {% if desabilitada %}style="opacity: .5"{% endif %}>
+          <input type="radio" name="acao" value="{{ codigo }}" {{ 'disabled' if desabilitada }} {{ 'checked' if loop.first and not desabilitada }}>
+          <span><b>{{ acao.rotulo }}</b><span>{{ acao.ajuda }}</span></span>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="extra" data-acoes="ADOTAR_FONTE">
+      <div class="campo" style="margin-bottom: 8px"><label for="reg-{{ c.id }}">Registro a adotar</label>
+        <select id="reg-{{ c.id }}" name="registro_id">
+          {% for r, lote in totais_vigentes %}<option value="{{ r.id }}">{{ r.declaracao_id|sigla }} — {{ r.valor_centavos|reais2 }} ({{ CONCEITOS.get(r.conceito, r.conceito)|lower }}; v{{ r.versao }}, lote {{ lote.id }})</option>{% endfor %}
+        </select>
+        <span class="sutil">A concordância de bases auxiliares é evidência, não autoriza substituição automática. Fundamente a escolha.</span>
+      </div>
+    </div>
+    <div class="extra" data-acoes="CORRIGIR_VALOR">
+      <div class="campo" style="margin-bottom: 8px; max-width: 260px"><label for="val-{{ c.id }}">Valor corrigido (R$)</label><input id="val-{{ c.id }}" name="valor" inputmode="decimal" placeholder="1.234.567,89"></div>
+    </div>
+    <div class="campo" style="margin-bottom: 8px"><label for="jus-{{ c.id }}">Justificativa <span data-justificativa-obrigatoria="ADOTAR_FONTE,CORRIGIR_VALOR,DESCONSIDERAR,DIFERENCA_CONCEITO,SOLICITAR_ESCLARECIMENTO{{ ',MANTER_PRINCIPAL' if c.gravidade_max >= 3 }}"></span></label>
+      <textarea id="jus-{{ c.id }}" name="justificativa" placeholder="Explique a conclusão de forma que outra pessoa consiga verificá-la."></textarea></div>
+    <div class="campo" style="margin-bottom: 10px"><label for="evi-{{ c.id }}">Evidências e documentos (link, ofício, página do balanço) <span class="extra" data-acoes="CORRIGIR_VALOR">— obrigatório para correção</span></label>
+      <input id="evi-{{ c.id }}" name="evidencias" style="width: 100%"></div>
+    <div style="display: flex; gap: 10px; align-items: center">
+      <button class="primario" type="submit">Registrar conclusão</button>
+      <span class="form-mensagem" role="status" aria-live="polite"></span>
+    </div>
+    <p class="sutil" style="margin-top: 8px">A decisão fica ligada à versão dos dados analisados (impressão {{ c.impressao[:10] }}…). Se um novo dado ou retificação mudar as evidências, o caso volta para reanálise. Responsável: você; data e hora registradas automaticamente.</p>
+  </form>
+</section>

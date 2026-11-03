@@ -1,0 +1,48 @@
+{% macro celula_valor(v, eh_principal=false) -%}
+{%- if not v -%}
+  <span class="sutil" title="Sem registro desta fonte">—</span>
+{%- else -%}
+  {%- set estado = v.estado -%}
+  {%- if estado == 'AUSENTE' -%}<span class="estado" title="A linha existe na fonte, mas a célula está vazia">vazio</span>
+  {%- elif estado == 'INVALIDO' -%}<span class="estado" title="Valor em formato inválido">inválido</span>
+  {%- else -%}
+    <span class="valor num">{% if v.alertas %}<span class="marca-alerta" aria-hidden="true">⚠ </span>{% endif %}{{ v.original|reais }}</span>
+    {%- if estado == 'ZERO' %}<span class="estado zero" title="Zero declarado (não é ausência)">zero declarado</span>{% endif -%}
+    {%- if not eh_principal -%}
+      {%- if v.comparabilidade == 'NAO' -%}<span class="nao-comp" title="{{ v.motivo }}">≠ conceito · não comparável</span>
+      {%- elif v.percentual is not none -%}<span class="valor-meta num" title="Diferença em relação à referência{% if v.comparabilidade == 'RESSALVA' %} (comparação com ressalva: {{ v.motivo }}){% endif %}">{{ v.percentual|pcts }}{% if v.comparabilidade == 'RESSALVA' %} ⁎{% endif %}</span>
+      {%- elif v.assinada is not none -%}<span class="valor-meta num" title="Percentual não calculável: referência zero">{{ v.assinada|reais }} · % n/c</span>
+      {%- endif -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro chips(resumo) -%}
+{%- for regra, g in resumo -%}
+  {%- set r = REGRAS.get(regra) -%}
+  <span class="chip {{ GRAVIDADE_CLASSE[g] }}" title="{{ GRAVIDADES[g] }}: {{ r.objetivo if r else regra }}"><span aria-hidden="true">{{ GRAVIDADE_ICONE[g] }}</span>{{ r.nome if r else regra }}</span>
+{%- endfor -%}
+{%- endmacro %}
+
+{% macro situacao(s) -%}
+{%- set item = SITUACOES.get(s, (s, 'neutro')) -%}
+<span class="sit {{ item[1] }}">{{ item[0] }}</span>
+{%- endmacro %}
+
+{% macro gravidade_chip(g) -%}
+<span class="chip {{ GRAVIDADE_CLASSE[g] }}"><span aria-hidden="true">{{ GRAVIDADE_ICONE[g] }}</span> {{ GRAVIDADES[g] }}</span>
+{%- endmacro %}
+
+
+{% macro selo_confianca(nivel, motivo, situacao_analise=none) -%}
+{%- if nivel is none -%}
+  <span class="confianca cna" title="{{ motivo }}">Não avaliado</span>
+{%- else -%}
+  {%- set item = NIVEIS_CONFIANCA[nivel] -%}
+  <span class="confianca {{ item[1] }}" title="{{ nivel }} · {{ item[0] }} — {{ motivo }}"><b>{{ nivel }}</b> {{ item[0] }}</span>
+{%- endif -%}
+{%- if situacao_analise in ('ESCLARECIDO', 'AJUSTADO', 'DESCONSIDERADO') -%}
+  <span class="decidido" title="Há decisão do analista vigente; o nível acima reflete só as fontes">✓ Decidido</span>
+{%- endif -%}
+{%- endmacro %}

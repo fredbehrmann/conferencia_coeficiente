@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+data/
+dados/
+bases/
+relatorios/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+tests/
+*.sqlite
+*.sqlite-*
+*.bat

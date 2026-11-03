@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Revisão</h1>
+<p class="lede">Decisões de estado, DF, capital ou valor acima do corte. Outra pessoa precisa confirmá-las antes de a base fechar.</p>
+<article class="metrica">
+  <strong>{{ total | inteiro }}</strong>
+  <span>decisões vigentes ainda sem confirmação de outra pessoa</span>
+</article>
+<div class="tabela">
+  <table>
+    <thead><tr><th>Ente</th><th>Ano</th><th>Bloco</th><th>Valor</th><th>Autor</th><th></th></tr></thead>
+    <tbody>
+      {% for decisao, ente, autor in linhas %}
+        <tr>
+          <td><a href="/ente/{{ ente.id_ente }}#{{ decisao.ano }}-{{ decisao.bloco }}">{{ ente.nome }}</a><br><span class="mudo">{{ ente.uf }}</span></td>
+          <td>{{ decisao.ano }}</td>
+          <td>{{ decisao.bloco }}</td>
+          <td>{{ decisao.valor | reais }}</td>
+          <td>{{ autor.nome }}</td>
+          <td>
+            {% if usuario.perfil == "REVISOR" %}
+              <form method="post" action="/decisao/{{ decisao.id }}/confirmar">
+                <input type="hidden" name="origem" value="revisao">
+                <button type="submit">Confirmar</button>
+              </form>
+            {% else %}
+              <a href="/ente/{{ ente.id_ente }}#{{ decisao.ano }}-{{ decisao.bloco }}">Abrir</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6">Nenhuma confirmação pendente.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if paginas > 1 %}
+  <p class="paginacao">
+    {% if pagina > 1 %}<a href="{{ anterior }}">Anterior</a>{% endif %}
+    <span class="mudo">Página {{ pagina }} de {{ paginas }}</span>
+    {% if pagina < paginas %}<a href="{{ seguinte }}">Próxima</a>{% endif %}
+  </p>
+{% endif %}
+{% endblock %}

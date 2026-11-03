@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Efeito da regra nova</h1>
+<p class="aviso">{{ entram }} blocos passam a pedir decisão individual. {{ saem }} deixam de pedir.</p>
+<p>As decisões já tomadas permanecem.</p>
+<form method="post" action="/regras/{{ regra_id }}/confirmar">
+  <button type="submit">Confirmar a nova versão</button>
+</form>
+<form method="post" action="/regras/{{ regra_id }}/cancelar">
+  <button class="secundario" type="submit">Cancelar</button>
+</form>
+{% endblock %}

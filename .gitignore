@@ -1,0 +1,17 @@
+# dados locais e gerados (nunca versionar)
+data/
+dados/
+bases/
+relatorios/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

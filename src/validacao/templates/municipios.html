@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Municípios de {{ curto }}</h1>
+<form method="get">
+  <label>Nome <input name="q" value="{{ termo }}"></label>
+  <button class="secundario" type="submit">Filtrar</button>
+</form>
+<ul>
+  {% for ente in entes %}
+    <li><a href="/ente/{{ ente.id_ente }}">{{ ente.nome }}</a></li>
+  {% else %}
+    <li>Nenhum município com esse nome.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

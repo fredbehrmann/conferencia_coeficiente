@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block titulo %}Lote {{ lote.id }}{% endblock %}
+{% block conteudo %}
+<p><a href="/importar">← Lotes</a></p>
+<section class="bloco">
+  <h2>Lote {{ lote.id }} — {{ lote.declaracao_id|sigla }}{% if lote.ficticio %} <span class="hipotese">fictício</span>{% endif %}</h2>
+  <dl class="cartao-regra" style="display: grid; grid-template-columns: 180px 1fr; border: 0; padding: 0">
+    <dt class="sutil">Origem</dt><dd>{{ lote.origem_tipo }}</dd>
+    <dt class="sutil">Arquivo</dt><dd style="overflow-wrap: anywhere">{{ lote.arquivo }}{% if lote.aba %} · aba {{ lote.aba }}{% endif %}</dd>
+    <dt class="sutil">Data da extração</dt><dd>{{ lote.data_extracao|data or '—' }}</dd>
+    <dt class="sutil">Importado em</dt><dd>{{ lote.data_importacao|datahora }} por {{ lote.usuario }}</dd>
+    <dt class="sutil">Hash do conteúdo</dt><dd class="mono">{{ lote.hash_conteudo }}</dd>
+    <dt class="sutil">Contagens</dt><dd>{{ lote.lidos|milhar }} lidos · {{ lote.novos|milhar }} novos · {{ lote.novas_versoes|milhar }} versões · {{ lote.repetidos|milhar }} iguais · {{ lote.erros|milhar }} ocorrências</dd>
+    <dt class="sutil">Parâmetros</dt><dd class="mono" style="font-size: 11px; overflow-wrap: anywhere">{{ lote.parametros }}</dd>
+    {% if lote.observacao %}<dt class="sutil">Observação</dt><dd>{{ lote.observacao }}</dd>{% endif %}
+  </dl>
+  <a class="botao" href="/dados?lote={{ lote.id }}&versoes=todas">Ver registros do lote</a>
+</section>
+{% if relatorio.get('erros') %}<section class="bloco"><h2>Ocorrências</h2>{% include "_erros.html" %}</section>{% endif %}
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>{{ ente.nome }}</h1>
+<p>Coeficiente {{ apuracao.coeficiente }}. Base do ente {{ memoria.base_ente | reais }}. Base da esfera {{ memoria.base_esfera | reais }}.</p>
+{% for ano in memoria.anos %}
+  <h2>{{ ano.ano }} — {{ ano.valor | reais }}</h2>
+  <ul>
+    {% for bloco in ano.blocos %}
+      <li>
+        {{ bloco.bloco }}: {{ bloco.valor | reais }}
+        — decisão {{ bloco.decisao_id }}
+        {% if bloco.fonte %} por {{ bloco.fonte }}{% endif %}
+        {% if bloco.cargas %}
+          <ul>
+            {% for carga in bloco.cargas %}
+              <li>{{ carga.fonte }} — carga {{ carga.carga_id }}{% if carga.linha_origem is not none %} — linha {{ carga.linha_origem }}{% endif %}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% endfor %}
+{% endblock %}

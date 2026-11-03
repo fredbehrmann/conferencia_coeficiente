@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Andamento</h1>
+<p class="lede">Onde a decisão ainda falta, para escolher por onde começar. A lista começa pelas UFs com menor proporção decidida.</p>
+<div class="resumo">
+  <article class="metrica">
+    <a href="/fila"><strong>{{ painel.pendentes | inteiro }}</strong><span>blocos na fila de decisão</span></a>
+  </article>
+  <article class="metrica">
+    <a href="/revisao"><strong>{{ painel.sem_revisao | inteiro }}</strong><span>decisões na fila de revisão</span></a>
+  </article>
+  <article class="metrica">
+    <strong>{{ painel.atrasadas | inteiro }}</strong>
+    <span>fontes com carga atrasada ou com erro</span>
+  </article>
+</div>
+<h2>Por UF</h2>
+<div class="tabela">
+  <table>
+    <thead><tr><th>UF</th><th>Esfera</th><th>Decididos</th><th></th><th>Anos</th></tr></thead>
+    <tbody>
+      {% for grupo in painel.por_uf %}
+        <tr>
+          <td><a href="/fila?esfera={{ grupo.esfera }}&uf={{ grupo.uf }}">{{ grupo.uf }}</a></td>
+          <td>{% if grupo.esfera == 'MUNICIPIO' %}Municípios{% elif grupo.esfera == 'ESTADO' %}Estado{% else %}DF{% endif %}</td>
+          <td>{{ grupo.decididos | inteiro }} de {{ grupo.total | inteiro }}<br><span class="mudo">{{ "%.0f"|format(grupo.proporcao * 100) }}%</span></td>
+          <td><div class="barra" role="img" aria-label="{{ "%.0f"|format(grupo.proporcao * 100) }} por cento decidido"><span style="width: {{ "%.1f"|format(grupo.proporcao * 100) }}%"></span></div></td>
+          <td>
+            {% for ano in grupo.anos %}
+              <a class="tag {% if ano.proporcao == 1 %}ok{% elif ano.decididos %}aviso{% else %}vermelho{% endif %}" href="/fila?esfera={{ grupo.esfera }}&uf={{ grupo.uf }}&ano={{ ano.ano }}">{{ ano.ano }} {{ "%.0f"|format(ano.proporcao * 100) }}%</a>
+            {% endfor %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Ainda não há verificação para acompanhar.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<h2>Cargas</h2>
+<div class="tabela">
+  <table>
+    <thead><tr><th>Fonte</th><th>Última conclusão</th><th>Intervalo</th><th>Situação</th></tr></thead>
+    <tbody>
+      {% for carga in painel.cargas %}
+        <tr>
+          <td>{{ carga.nome }}</td>
+          <td>{{ carga.ultima or "—" }}</td>
+          <td>
+            {% if usuario.perfil == "ADMINISTRADOR" %}
+              <form method="post" action="/painel/agenda">
+                <input type="hidden" name="fonte_id" value="{{ carga.fonte }}">
+                <input name="intervalo_dias" value="{{ carga.intervalo_dias }}" size="4" required aria-label="Intervalo de {{ carga.nome }} em dias">
+                <button class="secundario" type="submit">Gravar</button>
+              </form>
+            {% else %}
+              {{ carga.intervalo_dias }} dias
+            {% endif %}
+          </td>
+          <td>
+            {% if carga.atrasada %}<span class="tag vermelho">Atrasada</span>{% else %}<span class="tag ok">Em dia</span>{% endif %}
+            {% if carga.erro %}<br><span class="mudo">{{ carga.erro }}</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

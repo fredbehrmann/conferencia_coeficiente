@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block titulo %}Central de inconsistências{% endblock %}
+{% block conteudo %}
+{% set ind = resultado.indicadores %}
+<section class="indicadores" aria-label="Indicadores da consulta filtrada">
+  <div class="indicador destaque"><b>{{ ind.casos_com_alerta|milhar }}</b><span>casos com alerta</span></div>
+  <div class="indicador"><b>{{ ind.entes_com_alerta|milhar }}</b><span>entes com alerta</span></div>
+  <div class="indicador"><b>{{ ind.alertas|milhar }}</b><span>alertas (um caso pode ter vários)</span></div>
+  <div class="indicador"><b>{{ ind.abertos|milhar }}</b><span>casos pendentes de análise</span></div>
+  <div class="indicador"><b>{{ ind.reanalise|milhar }}</b><span>com reanálise necessária</span></div>
+  <div class="indicador"><b>{{ ind.decididos|milhar }}</b><span>casos com conclusão</span></div>
+  <div class="indicador"><b>{{ ind.sem_validacao|milhar }}</b><span>sem validação suficiente</span></div>
+  <div class="indicador"><b>{{ ind.casos|milhar }}</b><span>casos na consulta · {{ ind.entes|milhar }} entes · {{ ind.registros|milhar }} registros</span></div>
+</section>
+
+<form class="filtros" method="get" action="/" aria-label="Filtros">
+  <input type="hidden" name="enviado" value="1">
+  <div class="filtros-linha">
+    <div class="campo"><label for="f-q">Ente ou código IBGE</label><input id="f-q" type="search" name="q" data-autocompletar-ente autocomplete="off" value="{{ filtros.q }}" placeholder="Digite o nome ou o código"></div>
+    <div class="campo"><label for="f-uf">UF</label><select id="f-uf" name="uf"><option value="">Todas</option>{% for uf in UFS %}<option {{ 'selected' if filtros.uf == uf }}>{{ uf }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-esfera">Esfera</label><select id="f-esfera" name="esfera"><option value="">Todas</option><option value="MUNICIPIO" {{ 'selected' if filtros.esfera == 'MUNICIPIO' }}>Município</option><option value="ESTADO" {{ 'selected' if filtros.esfera == 'ESTADO' }}>Estado</option><option value="DF" {{ 'selected' if filtros.esfera == 'DF' }}>Distrito Federal</option></select></div>
+    <div class="campo"><label for="f-ano">Exercício</label><select id="f-ano" name="exercicio"><option value="">Todos</option>{% for a in EXERCICIOS %}<option {{ 'selected' if filtros.exercicio == a|string }}>{{ a }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-comp">Componente</label><select id="f-comp" name="componente"><option value="">Todos</option>{% for c in componentes %}<option value="{{ c.id }}" {{ 'selected' if filtros.componente == c.id }} {{ '' if c.ativo else 'disabled' }}>{{ c.nome }}{{ '' if c.ativo else ' (não implementado)' }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-fonte" title="Sem tipo de alerta: casos em que a fonte tem valor. Com tipo de alerta: casos em que a fonte está envolvida naquele alerta.">Fonte</label><select id="f-fonte" name="fonte"><option value="">Qualquer</option>{% for d in declaracoes if d.id in com_dados %}<option value="{{ d.id }}" {{ 'selected' if filtros.fonte == d.id }}>{{ d.sigla }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-tipo">Tipo de alerta</label><select id="f-tipo" name="tipo"><option value="">Todos</option>{% for codigo in ORDEM_REGRAS %}<option value="{{ codigo }}" {{ 'selected' if filtros.tipo == codigo }}>{{ REGRAS[codigo].nome }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-grav">Gravidade máxima</label><select id="f-grav" name="gravidade"><option value="">Todas</option>{% for g in [4,3,2,1] %}<option value="{{ g }}" {{ 'selected' if filtros.gravidade == g|string }}>{{ GRAVIDADES[g] }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-sit">Situação da análise</label><select id="f-sit" name="situacao"><option value="">Todas</option>{% for codigo, item in SITUACOES.items() %}<option value="{{ codigo }}" {{ 'selected' if filtros.situacao == codigo }}>{{ item[0] }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="f-conf">Confiança</label><select id="f-conf" name="confianca"><option value="">Todas</option>{% for n in [5, 4, 3, 2, 1, 0] %}<option value="{{ n }}" {{ 'selected' if filtros.confianca == n|string }}>{{ n }} · {{ NIVEIS_CONFIANCA[n][0] }}</option>{% endfor %}<option value="ate2" {{ 'selected' if filtros.confianca == 'ate2' }}>Até 2 (baixa ou menor)</option><option value="ate3" {{ 'selected' if filtros.confianca == 'ate3' }}>Até 3 (moderada ou menor)</option><option value="na" {{ 'selected' if filtros.confianca == 'na' }}>Não avaliado</option></select></div>
+    <div class="campo"><label for="f-ordem">Ordenar por</label><select id="f-ordem" name="ordem">{% for codigo, rotulo in ORDENACOES.items() %}<option value="{{ codigo }}" {{ 'selected' if filtros.ordem == codigo }}>{{ rotulo }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="filtros-linha" style="margin-top: 8px">
+    <label class="chave"><input type="checkbox" name="somente_alerta" value="1" {{ 'checked' if filtros.somente_alerta }}> Somente casos com alerta</label>
+    <label class="chave"><input type="checkbox" name="somente_pendentes" value="1" {{ 'checked' if filtros.somente_pendentes }}> Somente pendentes</label>
+    <button class="primario" type="submit">Aplicar filtros</button>
+    <a class="botao discreto" href="/">Limpar</a>
+    <a class="botao discreto" href="/resultado?{{ filtros.query(pagina=1) }}">Ver no resultado e exportar →</a>
+  </div>
+  <div class="colunas-sel">
+    <span class="sutil">Bases exibidas:</span>
+    {% for d in declaracoes if d.id in com_dados %}
+      <label class="chave"><input type="checkbox" name="col" value="{{ d.id }}" {{ 'checked' if d.id in filtros.colunas }}> {{ d.sigla }}</label>
+    {% endfor %}
+    {% for d in declaracoes if d.id not in com_dados %}<span class="sutil" title="Sem registros importados">{{ d.sigla }} (sem dados)</span>{% endfor %}
+  </div>
+</form>
+
+{% if not resultado.execucao %}
+<div class="bloco">Nenhuma validação foi executada. Use <b>Executar validação</b> acima.</div>
+{% else %}
+<div class="tabela-quadro" id="quadro">
+<table class="central" aria-describedby="legenda-central">
+  <thead>
+    <tr class="colunas">
+      <th class="fixa f1"><span class="visualmente-oculto">Expandir</span></th>
+      <th class="fixa f2">Ente</th>
+      <th class="fixa f3">IBGE</th>
+      <th class="fixa f4">UF</th>
+      <th class="fixa f5 num">Exerc.</th>
+      <th>Comp.</th>
+      <th class="num" title="Valor de referência e declaração de origem">Principal</th>
+      {% for col in filtros.colunas %}<th class="num" title="Valor original e diferença percentual em relação à referência">{{ col|sigla }}</th>{% endfor %}
+      <th class="num" title="Maior diferença entre um par comparável (R$ e %)">Maior diferença</th>
+      <th>Alertas</th>
+      <th>Situação</th>
+      <th title="Confiança no valor principal (0 = sem confiança, 5 = muito alta), calculada a partir da concordância das fontes">Análise</th>
+      <th class="num">Proposto / adotado</th>
+      <th><span class="visualmente-oculto">Ação</span></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for l in resultado.linhas %}{% include "_linha.html" %}{% else %}
+    <tr><td colspan="{{ 13 + filtros.colunas|length }}" class="sutil" style="padding: 20px">Nenhum caso com estes filtros.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="paginacao">
+  <span>{{ resultado.total|milhar }} casos · página {{ filtros.pagina }} de {{ resultado.paginas }}</span>
+  {% if filtros.pagina > 1 %}<a class="botao pequeno" href="/?{{ filtros.query(pagina=filtros.pagina - 1) }}">← Anterior</a>{% endif %}
+  {% if filtros.pagina < resultado.paginas %}<a class="botao pequeno" href="/?{{ filtros.query(pagina=filtros.pagina + 1) }}">Próxima →</a>{% endif %}
+  <span id="legenda-central" class="sutil">Valores em R$ sem centavos (cálculos em centavos). ⚠ e fundo colorido: célula envolvida em alerta. ⁎ comparação com ressalva de conceito. Percentual = (fonte − referência) ÷ |referência|. Alt+↓/↑ navega entre casos com o painel aberto.</span>
+</div>
+{% endif %}
+{% endblock %}
+{% block depois %}
+<div class="painel-fundo" id="painel-fundo"></div>
+<aside class="painel" id="painel" role="dialog" aria-modal="true" aria-label="Análise do caso">
+  <div class="painel-barra">
+    <button type="button" data-fechar title="Fechar (Esc)">✕ Fechar</button>
+    <button type="button" id="caso-anterior" title="Caso anterior (Alt+↑)">↑ Anterior</button>
+    <button type="button" id="caso-proximo" title="Próximo caso (Alt+↓)">↓ Próximo</button>
+    <span id="caso-posicao" class="sutil"></span>
+  </div>
+  <div class="painel-corpo"></div>
+</aside>
+{% endblock %}

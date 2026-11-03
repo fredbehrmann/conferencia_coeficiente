@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Cota por UF</h1>
+<p class="lede">Anos em que a cota repassada pelo estado não fecha com a soma do que os municípios declaram. Abra o ano para ver cada município.</p>
+<div class="tabela">
+  <table>
+    <thead><tr><th>UF</th><th>Ano</th><th>Cota do estado</th><th></th></tr></thead>
+    <tbody>
+      {% for linha, ente in pares %}
+        <tr>
+          <td>{{ ente.uf }} — {{ ente.nome }}</td>
+          <td>{{ linha.ano }}</td>
+          <td>{{ linha.valor_referencia | reais }}</td>
+          <td><a class="abrir" href="/uf/{{ ente.uf }}/{{ linha.ano }}">Ver municípios</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4">Nenhum par UF-ano nesta situação.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if pares_sefaz %}
+  <h2>Par publicado pela SEFAZ</h2>
+  <div class="tabela">
+    <table>
+      <thead><tr><th>UF</th><th>Ano</th><th>Cota repassada na SEFAZ</th><th>Cota repassada no SICONFI</th></tr></thead>
+      <tbody>
+        {% for ente, ano, sefaz, siconfi in pares_sefaz %}
+          <tr>
+            <td>{{ ente.uf }} — {{ ente.nome }}</td>
+            <td>{{ ano }}</td>
+            <td>{{ sefaz | reais }}</td>
+            <td>{{ siconfi | reais }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "_macros.html" import situacao %}
+{% block titulo %}Resultado{% endblock %}
+{% block conteudo %}
+<div class="colunas2">
+  <section class="bloco">
+    <h2>Valores propostos, adotados e pendentes</h2>
+    <p class="sutil">Visão por situação da análise, para o componente selecionado e todos os exercícios (exceto entes fora do universo). Somas nominais, sem a atualização do art. 115, § 2º.</p>
+    <table class="tabela-simples">
+      <thead><tr><th>Situação</th><th class="num">Casos</th><th class="num">Soma proposta</th><th class="num">Soma adotada</th></tr></thead>
+      <tbody>
+      {% for codigo, item in SITUACOES.items() if codigo in resumo.por_situacao %}
+        {% set r = resumo.por_situacao[codigo] %}
+        <tr><td>{{ situacao(codigo) }}</td><td class="num">{{ r.casos|milhar }}</td><td class="num">{{ r.proposto|curto }}</td><td class="num">{{ r.adotado|curto if r.adotado else '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="bloco">
+    <h2>Diferenças nos dados de arrecadação</h2>
+    <p class="sutil">Casos em que o valor adotado difere do valor principal (adotado − principal), por exercício.</p>
+    <table class="tabela-simples">
+      <thead><tr><th>Exercício</th><th class="num">Casos ajustados</th><th class="num">Efeito na arrecadação</th></tr></thead>
+      <tbody>
+      {% for ano, n, soma in resumo.diferencas %}<tr><td>{{ ano }}</td><td class="num">{{ n|milhar }}</td><td class="num">{{ soma|reais2 }}</td></tr>
+      {% else %}<tr><td colspan="3" class="sutil">Nenhum valor adotado difere do principal até agora.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <h2 style="margin-top: 14px">Impacto no coeficiente (IBS)</h2>
+    <div class="nota"><b>Indisponível.</b> O impacto no coeficiente só pode ser simulado com fórmula validada, todos os componentes do art. 115 (ISS, cota-parte do ICMS e componentes estaduais), a atualização do § 2º e o universo de cálculo definidos. Esta entrega cobre apenas a qualidade do ISS municipal; ver pendências P6 e P10 em <a href="/fontes">Fontes e metodologia</a>.</div>
+  </section>
+</div>
+
+<form class="filtros" method="get" action="/resultado">
+  <input type="hidden" name="enviado" value="1">
+  <div class="filtros-linha">
+    <div class="campo"><label for="r-q">Ente ou código IBGE</label><input id="r-q" type="search" name="q" data-autocompletar-ente autocomplete="off" value="{{ filtros.q }}" placeholder="Digite o nome ou o código"></div>
+    <div class="campo"><label for="r-uf">UF</label><select id="r-uf" name="uf"><option value="">Todas</option>{% for uf in UFS %}<option {{ 'selected' if filtros.uf == uf }}>{{ uf }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="r-ano">Exercício</label><select id="r-ano" name="exercicio"><option value="">Todos</option>{% for a in EXERCICIOS %}<option {{ 'selected' if filtros.exercicio == a|string }}>{{ a }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="r-sit">Situação</label><select id="r-sit" name="situacao"><option value="">Todas</option>{% for codigo, item in SITUACOES.items() %}<option value="{{ codigo }}" {{ 'selected' if filtros.situacao == codigo }}>{{ item[0] }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="r-tipo">Tipo de alerta</label><select id="r-tipo" name="tipo"><option value="">Todos</option>{% for codigo in ORDEM_REGRAS %}<option value="{{ codigo }}" {{ 'selected' if filtros.tipo == codigo }}>{{ REGRAS[codigo].nome }}</option>{% endfor %}</select></div>
+    <input type="hidden" name="componente" value="{{ filtros.componente }}">
+    <label class="chave"><input type="checkbox" name="somente_alerta" value="1" {{ 'checked' if filtros.somente_alerta }}> Somente com alerta</label>
+    <label class="chave"><input type="checkbox" name="somente_pendentes" value="1" {{ 'checked' if filtros.somente_pendentes }}> Somente pendentes</label>
+    <button class="primario" type="submit">Filtrar</button>
+  </div>
+  <div class="filtros-linha" style="margin-top: 10px">
+    <span class="sutil">{{ resultado.total|milhar }} casos na consulta. Exportar:</span>
+    <a class="botao" href="/resultado/exportar?formato=csv&{{ filtros.query() }}" data-exportar="csv" data-query="{{ filtros.query() }}">CSV</a>
+    <a class="botao" href="/resultado/exportar?formato=xlsx&{{ filtros.query() }}" data-exportar="xlsx" data-query="{{ filtros.query() }}">XLSX</a>
+    <a class="botao" href="/resultado/pacote?{{ filtros.query() }}" data-exportar="zip" data-query="{{ filtros.query() }}" title="ZIP com resultado, alertas, decisões, registros, parâmetros e execução">Pacote de conferência (ZIP)</a>
+    <span class="sutil" data-exportacao-estado role="status" aria-live="polite"></span>
+  </div>
+</form>
+
+<div class="tabela-quadro">
+<table class="tabela-simples">
+  <thead><tr><th>Ente</th><th>IBGE</th><th>UF</th><th class="num">Exerc.</th><th>Diagnóstico</th><th class="num">Principal</th><th class="num">Proposto</th><th>Situação</th><th class="num">Adotado</th><th>Fonte e regra</th><th>Justificativa e responsável</th><th>Pendências</th><th></th></tr></thead>
+  <tbody>
+  {% for l in resultado.linhas %}
+    {% set c = l.caso %}{% set d = l.decisao %}
+    <tr>
+      <td><b>{{ c.nome_ente }}</b></td><td class="mono">{{ c.id_ente }}</td><td>{{ c.uf }}</td><td class="num">{{ c.exercicio }}</td>
+      <td>{{ DIAGNOSTICOS.get(c.diagnostico, c.diagnostico) }}</td>
+      <td class="num">{{ c.valor_principal|reais2 if c.valor_principal is not none else '—' }}<div class="valor-meta">{{ c.declaracao_principal|sigla if c.declaracao_principal }}</div></td>
+      <td class="num">{{ c.valor_proposto|reais2 if c.valor_proposto is not none else '—' }}<div class="valor-meta">{{ c.declaracao_proposta|sigla if c.declaracao_proposta }}</div></td>
+      <td>{{ situacao(l.situacao) }}</td>
+      <td class="num">{% if d and not d.elegivel %}<span class="inelegivel">desconsiderado</span>{% elif d and d.valor_adotado is not none %}<b>{{ d.valor_adotado|reais2 }}</b>{% else %}—{% endif %}</td>
+      <td style="font-size: 12px">{% if d %}{{ 'Correção documentada' if d.declaracao_adotada == 'CORRECAO' else (d.declaracao_adotada|sigla if d.declaracao_adotada else '—') }}{% if d.registro_adotado_id %} · registro {{ d.registro_adotado_id }}{% endif %}<div class="sutil">regras v{{ d.conjunto_id or '—' }} · execução {{ d.execucao_id or '—' }}</div>{% else %}<span class="sutil">{{ c.motivo_proposta[:90] }}{{ '…' if c.motivo_proposta|length > 90 }}</span>{% endif %}</td>
+      <td style="font-size: 12px; max-width: 320px">{% if d %}{{ d.justificativa[:160] }}{{ '…' if d.justificativa|length > 160 }}<div class="sutil">{{ d.usuario }} · {{ d.criado_em|datahora }}</div>{% endif %}</td>
+      <td style="font-size: 12px">{% for t in c.tipos|tipos %}{{ REGRAS[t].nome if t in REGRAS else t }}{{ '; ' if not loop.last }}{% endfor %}</td>
+      <td><a class="botao pequeno" href="/?{{ filtros.query(caso=c.id, q=c.id_ente, exercicio=c.exercicio, somente_alerta='', pagina=1) }}">Analisar</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="13" class="sutil">Nenhum caso.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="paginacao">
+  <span>Página {{ filtros.pagina }} de {{ resultado.paginas }}</span>
+  {% if filtros.pagina > 1 %}<a class="botao pequeno" href="/resultado?{{ filtros.query(pagina=filtros.pagina - 1) }}">← Anterior</a>{% endif %}
+  {% if filtros.pagina < resultado.paginas %}<a class="botao pequeno" href="/resultado?{{ filtros.query(pagina=filtros.pagina + 1) }}">Próxima →</a>{% endif %}
+</div>
+
+<section class="bloco" style="margin-top: 14px">
+  <h2>Conclusão em lote para casos sem alerta</h2>
+  <p>Registra, em seu nome, a decisão <b>manter o valor principal</b> para os casos desta consulta que foram <b>conferidos sem alerta</b> e ainda não têm decisão. Casos com alerta, sem validação suficiente ou sem valor principal não são afetados. Cada caso recebe sua própria decisão, com a execução de validação que a fundamenta.</p>
+  <form method="post" action="/resultado/aceitar-sem-alerta" onsubmit="return confirm('Registrar “manter valor principal” para todos os casos conferidos sem alerta desta consulta?');">
+    {% for k, v in request.query_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <button type="submit">Registrar para os casos conferidos sem alerta</button>
+  </form>
+</section>
+{% endblock %}

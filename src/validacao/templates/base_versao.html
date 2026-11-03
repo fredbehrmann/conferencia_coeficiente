@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Base {{ versao.id }}</h1>
+<p>Congelada em {{ versao.data_congelamento }}. Hash {{ versao.hash }}.</p>
+<p>
+  <a href="/bases/{{ versao.id }}/exportar?formato=csv">CSV</a>
+  · <a href="/bases/{{ versao.id }}/exportar?formato=xlsx">XLSX</a>
+  · <a href="/apuracao/{{ versao.id }}">Coeficientes</a>
+</p>
+<table>
+  <thead><tr><th>Ente</th><th>Esfera</th><th>Ano</th><th>Bloco</th><th>Valor</th><th>Fonte</th><th>Decisão</th></tr></thead>
+  <tbody>
+    {% for linha in linhas %}
+      <tr>
+        <td><a href="/ente/{{ linha.id_ente }}">{{ linha.id_ente }}</a></td>
+        <td>{{ linha.esfera }}</td>
+        <td>{{ linha.ano }}</td>
+        <td>{{ linha.bloco }}</td>
+        <td>{{ linha.valor | reais }}</td>
+        <td>{{ linha.fonte or "—" }}</td>
+        <td>{{ linha.decisao_id }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

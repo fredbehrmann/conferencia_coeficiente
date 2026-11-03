@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block titulo %}Visão geral{% endblock %}
+{% block conteudo %}
+{% if not v.execucao %}
+<div class="bloco">Nenhuma validação executada. Use <b>Executar validação</b> acima.</div>
+{% else %}
+{% set comps = v.componentes %}
+{% set tot_casos = namespace(n=0, alerta=0, abertos=0, concl=0, reana=0, conf=0, exig=0) %}
+{% for c in v.ordem %}{% set x = comps[c] %}
+  {% set tot_casos.n = tot_casos.n + x.casos %}{% set tot_casos.alerta = tot_casos.alerta + x.com_alerta %}
+  {% set tot_casos.abertos = tot_casos.abertos + x.abertos %}{% set tot_casos.concl = tot_casos.concl + x.concluidos %}
+  {% set tot_casos.reana = tot_casos.reana + x.reanalise %}{% set tot_casos.conf = tot_casos.conf + x.diagnosticos.get('CONFERIDO', 0) %}
+  {% set tot_casos.exig = tot_casos.exig + x.exigiveis %}
+{% endfor %}
+<div class="cabeca-pagina">
+  <div>
+    <h2 style="font-size: 18px; margin: 0">Visão geral da base de referência</h2>
+    <p class="sutil" style="margin: 2px 0 0">Resumo gerencial da validação nº {{ v.execucao.id }} ({{ v.execucao.concluida_em|datahora }}). Valores nominais declarados: adotado quando há decisão, senão o proposto pela precedência. Não é a apuração do coeficiente.</p>
+  </div>
+</div>
+
+<section class="indicadores" aria-label="Indicadores gerais">
+  <div class="indicador"><b>{{ tot_casos.exig|milhar }}</b><span>casos exigíveis (ente × exercício × componente)</span></div>
+  <div class="indicador"><b>{{ ((tot_casos.conf / tot_casos.exig * 100) if tot_casos.exig else 0)|round(1)|string|replace('.', ',') }}%</b><span>conferidos sem alerta</span></div>
+  <div class="indicador destaque"><b>{{ tot_casos.alerta|milhar }}</b><span>casos com alerta</span></div>
+  <div class="indicador"><b>{{ tot_casos.abertos|milhar }}</b><span>pendentes de análise</span></div>
+  <div class="indicador"><b>{{ tot_casos.concl|milhar }}</b><span>com conclusão registrada</span></div>
+  <div class="indicador"><b>{{ tot_casos.reana|milhar }}</b><span>com reanálise necessária</span></div>
+  <div class="indicador"><b>{{ v.lotes|length }}</b><span>bases carregadas · {{ v.registros.values()|sum|milhar }} registros vigentes</span></div>
+</section>
+
+<section aria-label="Componentes">
+  <div class="cartoes-componente">
+  {% for c in v.ordem %}
+    {% set x = comps[c] %}
+    {% set exig = x.exigiveis or 1 %}
+    <article class="bloco cartao-comp">
+      <div class="cartao-topo">
+        <div>
+          <h2 style="margin: 0">{{ NOME_COMPONENTE.get(c, c) }}</h2>
+          <div class="sutil" style="font-size: 11px">{{ FUNDAMENTO_COMPONENTE.get(c, '')[:70] }}{{ '…' if FUNDAMENTO_COMPONENTE.get(c, '')|length > 70 }}</div>
+        </div>
+        <div style="text-align: right"><b class="num" style="font-size: 16px">{{ x.entes|milhar }}</b><div class="sutil" style="font-size: 11px">entes</div></div>
+      </div>
+      {{ graficos.get(c, '')|safe }}
+      <div class="barra-empilhada" role="img" aria-label="Distribuição dos casos por diagnóstico">
+        {% for d, classe in [('CONFERIDO', 'b-ok'), ('ALERTA', 'b-alerta'), ('SEM_VALIDACAO', 'b-semval'), ('NAO_EXIGIVEL', 'b-nexig')] %}
+          {% set n = x.diagnosticos.get(d, 0) %}
+          {% if n %}<span class="{{ classe }}" style="flex: {{ n }}" title="{{ DIAGNOSTICOS[d] }}: {{ n|milhar }} casos"></span>{% endif %}
+        {% endfor %}
+      </div>
+      <ul class="legenda-barra">
+        <li><i class="b-ok"></i>Sem alerta <b>{{ x.diagnosticos.get('CONFERIDO', 0)|milhar }}</b></li>
+        <li><i class="b-alerta"></i>Com alerta <b>{{ x.diagnosticos.get('ALERTA', 0)|milhar }}</b></li>
+        <li><i class="b-semval"></i>Sem validação <b>{{ x.diagnosticos.get('SEM_VALIDACAO', 0)|milhar }}</b></li>
+        <li><i class="b-nexig"></i>Não exigível <b>{{ x.diagnosticos.get('NAO_EXIGIVEL', 0)|milhar }}</b></li>
+      </ul>
+      <div class="andamento">
+        <span>Análise</span>
+        <div class="barra" title="{{ x.concluidos }} de {{ x.com_alerta }} casos com alerta têm conclusão"><span style="width: {{ ((x.concluidos / x.com_alerta * 100) if x.com_alerta else 100)|round(1) }}%"></span></div>
+        <span class="num">{{ x.concluidos|milhar }} / {{ x.com_alerta|milhar }}</span>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+        <a class="botao pequeno" href="/?enviado=1&somente_alerta=1&componente={{ c }}">Casos com alerta ({{ x.com_alerta|milhar }})</a>
+        <a class="botao pequeno discreto" href="/recuperacao?componente={{ c }}">Recuperação</a>
+      </div>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+
+<section class="bloco" aria-label="Valores por exercício">
+  <h2>Valores por componente e exercício</h2>
+  <p class="sutil">Soma nominal (R$) do valor adotado ou, na falta de decisão, do proposto. Entre parênteses, casos exigíveis sem valor elegível. Sem a atualização do art. 115, § 2º.</p>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead><tr><th>Componente</th>{% for a in v.exercicios %}<th class="num">{{ a }}</th>{% endfor %}<th class="num">Média 2019–2025</th></tr></thead>
+    <tbody>
+    {% for c in v.ordem %}
+      {% set linha = v.valores[c] %}
+      {% set soma = namespace(t=0, n=0) %}
+      <tr><td><b>{{ NOME_COMPONENTE.get(c, c) }}</b></td>
+      {% for a in v.exercicios %}{% set cel = linha.get(a) %}
+        <td class="num">{% if cel and cel.valor %}{{ cel.valor|curto }}{% if a < 2026 %}{% set soma.t = soma.t + cel.valor %}{% set soma.n = soma.n + 1 %}{% endif %}{% elif cel %}<span class="sutil">—</span>{% else %}<span class="sutil">n/a</span>{% endif %}
+          {% if cel and cel.sem_valor %}<div class="valor-meta" title="Casos exigíveis sem valor elegível">({{ cel.sem_valor|milhar }} sem valor)</div>{% endif %}</td>
+      {% endfor %}
+        <td class="num">{{ (soma.t // soma.n)|curto if soma.n else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div class="colunas2">
+<section class="bloco" aria-label="Concordância das fontes">
+  <h2>Concordância das fontes com a referência</h2>
+  <p class="sutil">Casos com valor na fonte; entre os comparáveis, a parcela que concorda com a referência dentro das tolerâncias. Fontes do SICONFI não são independentes da DCA.</p>
+  <table class="tabela-simples">
+    <thead><tr><th>Componente</th><th>Fonte</th><th class="num">Com valor</th><th class="num">Referência</th><th class="num">Comparáveis</th><th class="num">Concordam</th><th class="num">Não comparáveis</th><th class="num">Líquido de FUNDEB</th></tr></thead>
+    <tbody>
+    {% for item in v.concordancia if item.presentes %}
+      {% set taxa = (item.concordantes / item.comparaveis) if item.comparaveis else none %}
+      <tr>
+        <td>{{ ROTULO_CURTO.get(item.componente, item.componente) }}</td><td><b>{{ item.declaracao|sigla }}</b></td>
+        <td class="num">{{ item.presentes|milhar }}</td><td class="num">{{ item.referencia|milhar }}</td>
+        <td class="num">{{ item.comparaveis|milhar }}</td>
+        <td class="num">{% if taxa is not none %}<span class="taxa" style="--t: {{ (taxa * 100)|round(0) }}%">{{ (taxa * 100)|round(1)|string|replace('.', ',') }}%</span>{% else %}—{% endif %}</td>
+        <td class="num">{{ item.nao_comparaveis|milhar if item.nao_comparaveis else '—' }}</td>
+        <td class="num">{{ item.fundeb|milhar if item.fundeb else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="bloco" aria-label="Alertas por tipo">
+  <h2>Casos por tipo de alerta</h2>
+  <p class="sutil">Um caso com vários alertas aparece em cada tipo. Clique para abrir na central.</p>
+  <table class="tabela-simples">
+    <thead><tr><th>Regra</th>{% for c in v.ordem %}<th class="num">{{ ROTULO_CURTO.get(c, c) }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for regra in ORDEM_REGRAS if regra in v.alertas_regra %}
+      {% set linha = v.alertas_regra[regra] %}
+      {% set g = (linha.values()|map(attribute='gravidade')|max) %}
+      <tr><td><span class="chip {{ GRAVIDADE_CLASSE[g] }}"><span aria-hidden="true">{{ GRAVIDADE_ICONE[g] }}</span>{{ REGRAS[regra].nome }}</span></td>
+      {% for c in v.ordem %}{% set cel = linha.get(c) %}
+        <td class="num">{% if cel %}<a href="/?enviado=1&somente_alerta={{ '1' if regra not in ('PAR', 'NCP', 'FLF') else '' }}&tipo={{ regra }}&componente={{ c }}">{{ cel.casos|milhar }}</a>{% else %}<span class="sutil">—</span>{% endif %}</td>
+      {% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+</div>
+
+<div class="colunas2">
+<section class="bloco" aria-label="Situação por UF">
+  <h2>Casos com alerta por UF</h2>
+  <p class="sutil">Percentual dos casos exigíveis com alerta (cor mais intensa = maior proporção) e, abaixo, quantos seguem pendentes.</p>
+  <div style="overflow: auto; max-height: 520px">
+  <table class="tabela-simples mapa-uf">
+    <thead><tr><th>UF</th>{% for c in v.ordem %}<th class="num">{{ ROTULO_CURTO.get(c, c) }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for uf, linha in v.por_uf.items() %}
+      <tr><td><b>{{ uf }}</b></td>
+      {% for c in v.ordem %}{% set cel = linha.get(c) %}
+        {% if cel and cel.taxa is not none %}
+          <td class="num calor" style="--t: {{ (cel.taxa * 100)|round(0) }}%" title="{{ cel.alerta }} de {{ cel.total }} casos com alerta; {{ cel.abertos }} pendentes">
+            <a href="/?enviado=1&somente_alerta=1&uf={{ uf }}&componente={{ c }}">{{ (cel.taxa * 100)|round(1)|string|replace('.', ',') }}%</a>
+            <div class="valor-meta">{{ cel.abertos|milhar }} pend.</div></td>
+        {% else %}<td class="num sutil">—</td>{% endif %}
+      {% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div>
+<section class="bloco" aria-label="Maiores divergências pendentes">
+  <h2>Maiores divergências pendentes</h2>
+  <table class="tabela-simples">
+    <thead><tr><th>Ente</th><th>Comp.</th><th class="num">Exerc.</th><th class="num">Diferença</th><th>Par</th></tr></thead>
+    <tbody>
+    {% for caso, sit in v.maiores %}
+      <tr><td><a href="/?enviado=1&q={{ caso.id_ente }}&componente={{ caso.componente_id }}&caso={{ caso.id }}&somente_alerta=">{{ caso.nome_ente }}</a> <span class="sutil">{{ caso.uf }}</span></td>
+        <td>{{ ROTULO_CURTO.get(caso.componente_id, caso.componente_id) }}</td><td class="num">{{ caso.exercicio }}</td>
+        <td class="num">{{ caso.maior_dif_abs|curto }}<div class="valor-meta">{{ caso.maior_dif_pct|pct if caso.maior_dif_pct is not none else '% n/c' }}</div></td>
+        <td style="font-size: 12px">{{ (caso.par_maior or '').split('×')|map('sigla')|join(' × ') }}</td></tr>
+    {% else %}<tr><td colspan="5" class="sutil">Nenhuma divergência pendente.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="bloco" aria-label="Bases carregadas">
+  <h2>Bases carregadas</h2>
+  <table class="tabela-simples">
+    <thead><tr><th>Fonte</th><th class="num">Lotes</th><th class="num">Registros vigentes</th><th>Última importação</th><th>Extração</th></tr></thead>
+    <tbody>
+    {% for decl, n, importado, extraido in v.lotes %}
+      <tr><td><b>{{ decl|sigla }}</b></td><td class="num">{{ n }}</td><td class="num">{{ v.registros.get(decl, 0)|milhar }}</td><td>{{ importado|datahora }}</td><td>{{ extraido|data }}</td></tr>
+    {% endfor %}
+    {% for fonte, total, ok in v.consultas %}
+      <tr><td colspan="2" class="sutil">Consultas {{ fonte }} (pacote)</td><td class="num">{{ ok|milhar }} ok de {{ total|milhar }}</td><td colspan="2">{% if total - ok %}<a href="/recuperacao?filtro=falha_consulta">{{ (total - ok)|milhar }} com falha</a>{% else %}<span class="sutil">sem falhas</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin-top: 8px"><a href="/recuperacao">Ver recuperação por ente →</a> · <a href="/importar">Importar</a></p>
+</section>
+</div>
+</div>
+{% endif %}
+{% endblock %}

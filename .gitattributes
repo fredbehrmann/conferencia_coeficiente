@@ -1,0 +1,6 @@
+* text=auto
+*.bat text eol=crlf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.xlsx binary
+*.sqlite binary

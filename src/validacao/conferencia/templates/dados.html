@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block titulo %}Dados brutos{% endblock %}
+{% block conteudo %}
+<form class="filtros" method="get" action="/dados">
+  <div class="filtros-linha">
+    <div class="campo"><label for="d-q">Ente ou código IBGE</label><input id="d-q" type="search" name="q" data-autocompletar-ente autocomplete="off" value="{{ p.get('q', '') }}" placeholder="Digite o nome ou o código"></div>
+    <div class="campo"><label for="d-decl">Fonte</label><select id="d-decl" name="declaracao"><option value="">Todas</option>{% for d in declaracoes %}<option value="{{ d.id }}" {{ 'selected' if p.get('declaracao') == d.id }}>{{ d.sigla }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="d-ano">Exercício</label><select id="d-ano" name="exercicio"><option value="">Todos</option>{% for a in EXERCICIOS %}<option {{ 'selected' if p.get('exercicio') == a|string }}>{{ a }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="d-uf">UF</label><select id="d-uf" name="uf"><option value="">Todas</option>{% for uf in UFS %}<option {{ 'selected' if p.get('uf') == uf }}>{{ uf }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="d-par">Parcela</label><select id="d-par" name="parcela"><option value="">Todas</option>{% for codigo, rotulo in PARCELAS.items() %}<option value="{{ codigo }}" {{ 'selected' if p.get('parcela') == codigo }}>{{ rotulo }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="d-est">Estado do valor</label><select id="d-est" name="estado"><option value="">Todos</option>{% for codigo, rotulo in ESTADOS.items() %}<option value="{{ codigo }}" {{ 'selected' if p.get('estado') == codigo }}>{{ rotulo }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="d-comp">Componente</label><select id="d-comp" name="componente">{% for c in componentes %}<option value="{{ c.id }}" {{ 'selected' if p.get('componente') == c.id }}>{{ c.nome }}</option>{% endfor %}</select></div>
+    <label class="chave"><input type="checkbox" name="versoes" value="todas" {{ 'checked' if p.get('versoes') == 'todas' }}> Incluir versões substituídas</label>
+    {% if p.get('lote') %}<input type="hidden" name="lote" value="{{ p.lote }}"><span class="sutil">Lote {{ p.lote }}</span>{% endif %}
+    <button class="primario" type="submit">Filtrar</button>
+  </div>
+</form>
+<p class="sutil">Valores como extraídos, antes de qualquer tratamento: um registro por fonte, ente, exercício e campo. {{ r.total|milhar }} registros.</p>
+<div class="tabela-quadro">
+<table class="tabela-simples">
+  <thead><tr><th>Fonte</th><th>IBGE</th><th>Ente</th><th>UF</th><th class="num">Exerc.</th><th>Campo</th><th>Parcela</th><th>Conceito</th><th class="num">Valor (R$)</th><th>Texto original</th><th>Estado</th><th>Versão</th><th>Lote</th><th>Procedência</th></tr></thead>
+  <tbody>
+  {% for reg, nome, uf, lote in r.linhas %}
+    {% set pr = reg.procedencia|json %}
+    <tr {% if not reg.vigente %}style="opacity: .65"{% endif %}>
+      <td>{{ reg.declaracao_id|sigla }}</td><td class="mono">{{ reg.id_ente }}</td><td>{{ nome }}</td><td>{{ uf }}</td><td class="num">{{ reg.exercicio }}</td>
+      <td class="mono">{{ reg.campo }}</td><td>{{ PARCELAS.get(reg.parcela, reg.parcela or '—') }}</td><td>{{ CONCEITOS.get(reg.conceito, reg.conceito or '—') }}</td>
+      <td class="num">{{ reg.valor_centavos|reais2 if reg.valor_centavos is not none else '—' }}</td><td class="mono">{{ reg.valor_texto or '' }}</td>
+      <td>{{ ESTADOS.get(reg.estado, reg.estado) }}{% if reg.duplicado %} · duplicado{% endif %}</td>
+      <td>v{{ reg.versao }}{% if not reg.vigente %} (substituída){% endif %}</td>
+      <td><a href="/importar/lote/{{ lote.id }}">{{ lote.id }}</a></td>
+      <td style="font-size: 11.5px">{{ pr.arquivo or lote.arquivo|nome_arquivo }}{% if pr.aba %} · {{ pr.aba }}{% endif %}{% if pr.linha %} · linha {{ pr.linha }}{% endif %}{% if pr.coluna %} · {{ pr.coluna }}{% endif %}</td>
+    </tr>
+  {% else %}<tr><td colspan="14" class="sutil">Nenhum registro.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="paginacao">
+  <span>Página {{ pagina_atual }} de {{ r.paginas }}</span>
+  {% if pagina_atual > 1 %}<a class="botao pequeno" href="/dados?{{ base_q }}&pagina={{ pagina_atual - 1 }}">← Anterior</a>{% endif %}
+  {% if pagina_atual < r.paginas %}<a class="botao pequeno" href="/dados?{{ base_q }}&pagina={{ pagina_atual + 1 }}">Próxima →</a>{% endif %}
+</div>
+{% endblock %}

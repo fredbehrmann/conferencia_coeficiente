@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block titulo %}Fontes e metodologia{% endblock %}
+{% block conteudo %}
+<div class="colunas2">
+<section class="bloco">
+  <h2>Enquadramento normativo</h2>
+  <p class="sutil">Separação entre requisito normativo, metodologia aprovada e hipótese técnica. Fonte e versão de cada referência.</p>
+  {% for n in normas %}
+    <div style="border-top: 1px solid var(--linha); padding: 8px 0">
+      <b>{{ n.ref }}</b> <span class="{{ 'aprovado' if n.tipo == 'Requisito normativo' else 'hipotese' }}">{{ n.tipo }}</span>
+      <div>{{ n.texto }}</div>
+      <div class="sutil" style="font-size: 11.5px">Versão consultada: {{ n.versao }}</div>
+    </div>
+  {% endfor %}
+  <div class="nota">Esta aplicação valida a <b>qualidade dos dados de entrada</b>. Nenhum resultado aqui é a apuração do coeficiente. Regras de seleção, precedência e tolerâncias são <b>hipóteses técnicas</b> até aprovação formal.</div>
+</section>
+<section class="bloco">
+  <h2>Pendências de definição</h2>
+  {% for codigo, titulo, texto in pendencias %}
+    <div style="border-top: 1px solid var(--linha); padding: 8px 0"><b>{{ codigo }} — {{ titulo }}</b><div>{{ texto }}</div></div>
+  {% endfor %}
+</section>
+</div>
+
+<section class="bloco">
+  <h2>Componentes</h2>
+  <table class="tabela-simples">
+    <thead><tr><th>Componente</th><th>Esfera</th><th>Fundamento</th><th>Situação nesta entrega</th></tr></thead>
+    <tbody>{% for c in componentes %}<tr><td><b>{{ c.nome }}</b></td><td>{{ c.esfera|lower }}</td><td>{{ c.fundamento }}</td><td>{% if c.ativo %}<span class="aprovado">ativo</span> {% endif %}{{ c.situacao }}</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section class="bloco">
+  <h2>Declarações e bases</h2>
+  <p class="sutil">DCA, RREO e MSC são declarações do mesmo declarante no SICONFI e formam um único grupo de independência: a concordância entre elas não conta como validação independente.</p>
+  <table class="tabela-simples">
+    <thead><tr><th>Sigla</th><th>Nome</th><th>Sistema</th><th>Grupo de independência</th><th>Papel</th><th>Descrição</th><th>Base legal</th></tr></thead>
+    <tbody>{% for d in declaracoes %}<tr><td><b>{{ d.sigla }}</b></td><td>{{ d.nome }}</td><td>{{ d.sistema }}</td><td>{{ d.grupo_independencia }}</td><td>{{ 'principal' if d.papel == 'PRINCIPAL' else 'auxiliar' }}</td><td>{{ d.descricao }}</td><td>{{ d.base_legal }}</td></tr>{% endfor %}</tbody>
+  </table>
+  <h3 style="margin-top: 12px">Precedência configurada</h3>
+  <table class="tabela-simples">
+    <thead><tr><th>Componente</th><th>Precedência</th><th>Conceito de referência</th><th>Status</th></tr></thead>
+    <tbody>{% for comp, sel in config.selecao.items() %}<tr><td>{{ NOME_COMPONENTE.get(comp, comp) }}</td><td>{{ sel.precedencia|map('sigla')|join(' → ') }}</td><td>{{ CONCEITOS.get(sel.conceito_referencia, '')|lower }}</td><td><span class="hipotese">{{ sel.status|lower }}</span></td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section class="bloco">
+  <h2>Mapeamentos por declaração e campo</h2>
+  <p class="sutil">Como cada campo é interpretado: parcela, conceito e abrangência. Mudanças criam nova versão.</p>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead><tr><th>Fonte</th><th>Campo</th><th>Componente</th><th>Exercícios</th><th>Parcela</th><th>Conceito</th><th>Origem</th><th>Status</th><th>Evidência</th><th>Versão</th></tr></thead>
+    <tbody>{% for m in mapeamentos %}<tr>
+      <td>{{ m.declaracao_id|sigla }}</td><td class="mono">{{ m.campo }}</td><td>{{ m.componente_id }}</td><td>{{ m.exercicio_inicio }}–{{ m.exercicio_fim }}</td>
+      <td>{{ PARCELAS.get(m.parcela, m.parcela) }}</td><td>{{ 'Por registro (coluna de natureza)' if m.conceito == 'POR_REGISTRO' else CONCEITOS.get(m.conceito, m.conceito) }}</td>
+      <td style="font-size: 12px">{{ m.origem_detalhe }}</td><td><span class="{{ 'aprovado' if m.status == 'CONFIRMADO' else 'hipotese' }}">{{ m.status|lower }}</span></td>
+      <td style="font-size: 12px; max-width: 320px">{{ m.evidencia }}</td><td>{{ m.versao }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

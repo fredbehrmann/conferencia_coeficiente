@@ -1,0 +1,14 @@
+services:
+  conferencia:
+    build: .
+    image: conferencia-coeficiente:latest
+    container_name: conferencia-coeficiente
+    restart: unless-stopped
+    ports:
+      # só no próprio servidor; publique por um proxy com HTTPS (ver README)
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./dados:/dados          # banco (validacao.sqlite), cópias de segurança e tarefas
+      - ./bases:/bases:ro       # planilhas e pacote do SICONFI (base_validacao_coeficiente.csv etc.)

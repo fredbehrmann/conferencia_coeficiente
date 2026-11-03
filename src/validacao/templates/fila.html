@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Pendências</h1>
+<p class="lede">Blocos em que ainda falta escolher o valor que entra no coeficiente. Abra a linha para comparar as fontes e decidir.</p>
+<div class="resumo">
+  <article class="metrica">
+    <strong>{{ total | inteiro }}</strong>
+    <span>blocos nesta lista, ainda sem decisão</span>
+  </article>
+  {% if usuario.perfil == "ANALISTA" %}
+    <article class="metrica">
+      <strong>{{ lote | inteiro }}</strong>
+      <span>fecham com outra fonte e podem ser aceitos juntos</span>
+      {% if lote %}
+        <form method="post" action="/fila/aceitar">
+          <input type="hidden" name="esfera" value="{{ filtros.esfera }}">
+          <input type="hidden" name="uf" value="{{ filtros.uf }}">
+          <input type="hidden" name="ano" value="{{ filtros.ano }}">
+          <input type="hidden" name="situacao" value="{{ filtros.situacao }}">
+          <button type="submit">Aceitar os {{ lote }} blocos que fecham</button>
+        </form>
+      {% endif %}
+    </article>
+  {% endif %}
+  <article class="metrica">
+    <a href="/painel"><strong>Andamento</strong><span>ver quanto cada UF já decidiu</span></a>
+  </article>
+</div>
+<nav class="atalhos">
+  <a href="/fila?uf={{ filtros.uf }}&ano={{ filtros.ano }}&situacao={{ filtros.situacao }}" class="{% if not filtros.esfera %}ativa{% endif %}">Todos</a>
+  {% for valor, rotulo in esferas %}
+    <a href="/fila?esfera={{ valor }}&uf={{ filtros.uf }}&ano={{ filtros.ano }}&situacao={{ filtros.situacao }}" class="{% if filtros.esfera == valor %}ativa{% endif %}">{{ rotulo }}</a>
+  {% endfor %}
+</nav>
+<form class="filtros" method="get" action="/fila">
+  <input type="hidden" name="esfera" value="{{ filtros.esfera }}">
+  <label>UF <input name="uf" value="{{ filtros.uf }}" maxlength="2" size="3" placeholder="BA"></label>
+  <label>Ano <input name="ano" value="{{ filtros.ano }}" size="6" placeholder="2024"></label>
+  <label>Situação
+    <select name="situacao">
+      <option value="">As que pedem olhar</option>
+      {% for codigo, rotulo in situacoes %}
+        <option value="{{ codigo }}" {% if filtros.situacao == codigo %}selected{% endif %}>{{ rotulo }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="secundario" type="submit">Filtrar</button>
+  {% if filtros.uf or filtros.ano or filtros.situacao or filtros.esfera %}
+    <a class="secundario" href="/fila">Limpar</a>
+  {% endif %}
+</form>
+<div class="tabela">
+  <table>
+    <thead>
+      <tr><th>Ente</th><th>Ano</th><th>O que decidir</th><th>O que o motor viu</th><th>Valor sugerido</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for verificacao, ente in linhas %}
+        <tr>
+          <td>{{ ente.nome }}<br><span class="mudo">{{ ente.uf }} · {{ ente.id_ente }}</span></td>
+          <td>{{ verificacao.ano }}</td>
+          <td>{{ verificacao.rotulo_bloco }}</td>
+          <td>
+            {% for chip in verificacao.chips %}
+              <span class="tag {% if chip.grave %}vermelho{% elif chip.rotulo == 'fecha' %}ok{% else %}aviso{% endif %}">{{ chip.rotulo }}</span>
+            {% endfor %}
+          </td>
+          <td>{% if verificacao.fonte_sugerida %}{{ verificacao.fonte_sugerida }} · {{ verificacao.valor_sugerido | reais }}{% else %}—{% endif %}</td>
+          <td><a class="abrir" href="/ente/{{ ente.id_ente }}#{{ verificacao.ano }}-{{ verificacao.bloco }}">Decidir</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6">Nenhum bloco com esses filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if paginas > 1 %}
+  <p class="paginacao">
+    {% if pagina > 1 %}<a href="{{ anterior }}">Anterior</a>{% endif %}
+    <span class="mudo">Página {{ pagina }} de {{ paginas }}</span>
+    {% if pagina < paginas %}<a href="{{ seguinte }}">Próxima</a>{% endif %}
+  </p>
+{% endif %}
+{% endblock %}

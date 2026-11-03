@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block titulo %}Regras de qualidade{% endblock %}
+{% block conteudo %}
+<section class="bloco">
+  <h2>Catálogo de regras — versão {{ conjunto.id }} <span class="hipotese">parâmetros: hipóteses de trabalho</span></h2>
+  <p>As regras são independentes e só <b>apontam suspeitas</b>. Nenhuma regra altera, descarta ou escolhe valores: a detecção preserva os registros e gera pendências para análise. Alterar um parâmetro cria uma nova versão; decisões já tomadas são preservadas e a próxima validação reavalia os casos.</p>
+  <p class="sutil">Versão {{ conjunto.id }} criada em {{ conjunto.criado_em|datahora }} por {{ conjunto.criado_por }}. {{ conjunto.observacao }}</p>
+  <p class="sutil">Diferença assinada = fonte − referência · absoluta = |assinada| · percentual = assinada ÷ |referência| (não calculável se a referência é zero). Um limite é excedido só quando o valor é <b>estritamente maior</b>; igualdade com o limite não gera alerta. Quando o percentual não é calculável, decide o limite em reais.</p>
+</section>
+
+<form method="post" action="/regras">
+{% for codigo in ORDEM_REGRAS %}
+  {% set r = REGRAS[codigo] %}
+  {% set ajuste = config.regras.get(codigo, {}) %}
+  {% set params = ajuste.get('parametros', {}) %}
+  {% set cont = contagem.get(codigo) %}
+  <section class="cartao-regra" id="regra-{{ codigo }}">
+    <div>
+      <h2 style="margin-bottom: 2px">{{ r.nome }} <span class="sutil mono" style="font-weight: 400">{{ codigo }}</span></h2>
+      <div class="sutil">{{ r.tipo }}</div>
+      <dl>
+        <dt>Objetivo</dt><dd>{{ r.objetivo }}</dd>
+        <dt>Aplica-se a</dt><dd>{{ r.aplicacao }}</dd>
+        <dt>Fórmula</dt><dd><code class="mono">{{ r.formula }}</code></dd>
+        <dt>Base</dt><dd>{{ r.base }}</dd>
+        <dt>Casos atingidos</dt><dd>{% if cont %}<a href="/?enviado=1&somente_alerta=1&tipo={{ codigo }}"><b>{{ cont.casos|milhar }}</b> casos</a> · {{ cont.alertas|milhar }} alertas na última execução{% else %}nenhum na última execução{% endif %}</dd>
+      </dl>
+      {% if cont and cont.exemplos %}
+      <div style="margin-top: 6px"><b style="font-size: 12px">Exemplos reais da execução</b>
+        {% for id_ente, ano, nome, uf, msg, comp in cont.exemplos %}
+          <div class="exemplo"><a href="/caso/chave/{{ id_ente }}/{{ ano }}/{{ comp }}">{{ nome }} ({{ uf }}) {{ ano }} · {{ ROTULO_CURTO.get(comp, comp) }}</a> — {{ msg[:260] }}{{ '…' if msg|length > 260 }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div>
+      <label class="chave"><input type="checkbox" name="{{ codigo }}__ativa" value="1" {{ 'checked' if ajuste.get('ativa', true) }}> Regra ativa</label>
+      <div class="campo" style="margin: 6px 0"><label for="{{ codigo }}-g">Gravidade</label>
+        <select id="{{ codigo }}-g" name="{{ codigo }}__gravidade">{% for g in ['ALTA', 'MEDIA', 'BAIXA', 'INFO'] %}<option value="{{ g }}" {{ 'selected' if ajuste.get('gravidade', r.gravidade) == g }}>{{ {'ALTA': 'Alta', 'MEDIA': 'Média', 'BAIXA': 'Baixa', 'INFO': 'Informativa'}[g] }}</option>{% endfor %}</select></div>
+      {% for nome, padrao in r.parametros.items() %}
+        <div class="campo" style="margin-bottom: 6px"><label for="{{ codigo }}-{{ nome }}">{{ nome|replace('_', ' ') }} <span class="sutil">(padrão {{ padrao }})</span></label>
+          {% if nome == 'modo' %}
+            <select id="{{ codigo }}-{{ nome }}" name="{{ codigo }}__{{ nome }}"><option value="AMBAS" {{ 'selected' if params.get(nome, padrao) == 'AMBAS' }}>Alerta se exceder ambos os limites</option><option value="QUALQUER" {{ 'selected' if params.get(nome, padrao) == 'QUALQUER' }}>Alerta se exceder qualquer limite</option></select>
+          {% else %}
+            <input id="{{ codigo }}-{{ nome }}" name="{{ codigo }}__{{ nome }}" value="{{ params.get(nome, padrao) }}" inputmode="decimal">
+          {% endif %}
+          {% if 'tolerancia_absoluta' == nome or 'valor_minimo' == nome %}<span class="sutil">em reais</span>{% elif 'relativa' in nome or nome in ('faixa_alta', 'tolerancia_razao', 'tolerancia_corroboracao') %}<span class="sutil">fração (0,01 = 1%)</span>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+{% endfor %}
+
+<section class="bloco">
+  <h2>Seleção do valor principal e data de corte</h2>
+  <p class="sutil">Precedência por componente: a primeira declaração com valor fornece a referência. Identificadores: SICONFI_DCA, SICONFI_RREO, SICONFI_MSC, SIOPE, SIOPS, TCE, BALANCO, INFO_UF.</p>
+  <table class="tabela-simples" style="margin-bottom: 10px">
+    <thead><tr><th>Componente</th><th>Precedência</th><th>Conceito de referência</th><th>Status</th><th>Nota</th></tr></thead>
+    <tbody>
+    {% for comp, sel in config.selecao.items() %}
+      <tr><td><b>{{ NOME_COMPONENTE.get(comp, comp) }}</b></td>
+        <td><input name="precedencia__{{ comp }}" value="{{ sel.precedencia|join(',') }}" style="width: 260px"></td>
+        <td>{{ CONCEITOS.get(sel.conceito_referencia, sel.conceito_referencia)|lower }}</td>
+        <td><span class="hipotese">{{ sel.status|lower }}</span></td>
+        <td style="font-size: 12px">{{ sel.nota }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="grade-form">
+    <div class="campo"><label for="corte">Data de corte (vazio = data da execução)</label><input id="corte" name="data_corte" type="date" value="{{ (config.data_corte or '')[:10] }}"></div>
+    <div class="campo" style="grid-column: span 2"><label for="obs">Motivo da alteração</label><input id="obs" name="observacao" placeholder="Ex.: tolerância ajustada após reunião do subgrupo"></div>
+  </div>
+  <div style="margin-top: 12px; display: flex; gap: 10px">
+    <button class="primario" type="submit">Salvar nova versão dos parâmetros</button>
+    <button type="button" data-validar>Executar validação</button>
+  </div>
+</section>
+</form>
+
+<section class="bloco">
+  <h2>Versões e execuções</h2>
+  <div class="colunas2">
+    <table class="tabela-simples">
+      <thead><tr><th>Versão</th><th>Criada</th><th>Por</th><th>Observação</th></tr></thead>
+      <tbody>{% for v in conjuntos %}<tr><td>{{ v.id }}{% if v.vigente %} <span class="adotado-rotulo">vigente</span>{% endif %}</td><td>{{ v.criado_em|datahora }}</td><td>{{ v.criado_por }}</td><td>{{ v.observacao }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="tabela-simples">
+      <thead><tr><th>Execução</th><th>Regras</th><th>Concluída</th><th>Corte</th><th class="num">Casos</th><th class="num">Alertas</th><th>Situação</th></tr></thead>
+      <tbody>{% for e in execucoes %}<tr><td>{{ e.id }}</td><td>v{{ e.conjunto_id }}</td><td>{{ e.concluida_em|datahora }}</td><td>{{ e.data_corte|data }}</td><td class="num">{{ e.casos|milhar }}</td><td class="num">{{ e.alertas|milhar }}</td><td>{{ e.situacao|lower }}{% if e.mensagem %} <span class="sutil">{{ e.mensagem[:80] }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

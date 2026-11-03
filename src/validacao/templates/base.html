@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ titulo }} · Coeficiente</title>
+  <style>
+    :root {
+      --fundo: #f3f5f7;
+      --papel: #ffffff;
+      --linha: #e4e9ee;
+      --texto: #1c2834;
+      --mudo: #5c6b7a;
+      --marca: #1d4e89;
+      --marca-suave: #e8f1fb;
+      --ok: #0f6b4c;
+      --ok-suave: #e5f6ef;
+      --alerta: #9a3412;
+      --alerta-suave: #ffedd5;
+      --perigo: #9f1239;
+      --perigo-suave: #ffe4e6;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--texto); background: var(--fundo); font: 16px/1.45 "Segoe UI", sans-serif; }
+    a { color: var(--marca); }
+    header.topo { background: var(--papel); border-bottom: 1px solid var(--linha); }
+    .topo-linha, .abas-linha { max-width: 76rem; margin: 0 auto; padding: 0 1.2rem; }
+    .topo-linha { display: flex; gap: 1rem; align-items: center; padding-top: 0.85rem; padding-bottom: 0.35rem; }
+    .marca { color: var(--texto); text-decoration: none; font-weight: 700; letter-spacing: -0.02em; }
+    .marca small { display: block; font-weight: 500; color: var(--mudo); font-size: 0.78rem; }
+    .busca-topo { margin-left: auto; }
+    .busca-topo input { width: 16rem; max-width: 42vw; }
+    .quem { color: var(--mudo); font-size: 0.9rem; white-space: nowrap; }
+    .abas { display: flex; gap: 0.15rem; overflow-x: auto; }
+    .abas a { color: var(--mudo); text-decoration: none; padding: 0.75rem 0.85rem; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .abas a.ativa { color: var(--marca); border-bottom-color: var(--marca); font-weight: 650; }
+    main { max-width: 76rem; margin: 0 auto; padding: 1.3rem 1.2rem 3rem; }
+    h1 { font-size: 1.7rem; letter-spacing: -0.03em; margin: 0 0 0.25rem; }
+    h2 { font-size: 1.15rem; margin: 1.4rem 0 0.6rem; }
+    h3 { font-size: 1.05rem; margin: 0; }
+    .lede { color: var(--mudo); margin: 0 0 1rem; max-width: 46rem; }
+    .resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.75rem; margin: 0.2rem 0 1rem; }
+    .metrica, .cartao, .tabela, .aviso, .erro { background: var(--papel); border: 1px solid var(--linha); border-radius: 12px; }
+    .metrica { padding: 0.95rem 1.05rem; }
+    .metrica strong { display: block; font-size: 1.65rem; letter-spacing: -0.03em; }
+    .metrica span, .metrica small { color: var(--mudo); }
+    .metrica a { color: inherit; text-decoration: none; }
+    .aviso { background: var(--alerta-suave); padding: 0.8rem 1rem; }
+    .erro { background: var(--perigo-suave); padding: 0.8rem 1rem; }
+    .cartao { padding: 1rem 1.1rem; margin: 0.75rem 0; }
+    .cartao.pendente { border-left: 4px solid #c2410c; }
+    .cartao.decidido { border-left: 4px solid var(--ok); }
+    .cartao-topo { display: flex; justify-content: space-between; gap: 0.8rem; align-items: flex-start; margin-bottom: 0.7rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--papel); }
+    .tabela { overflow: auto; }
+    th, td { text-align: left; padding: 0.7rem 0.8rem; vertical-align: top; }
+    th { font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mudo); background: #f8fafc; border-bottom: 1px solid var(--linha); }
+    td { border-top: 1px solid var(--linha); }
+    tr.sugerida { background: var(--marca-suave); }
+    .mudo { color: var(--mudo); }
+    .tag { display: inline-block; border-radius: 999px; background: #eef2f6; color: #334155; padding: 0.12rem 0.55rem; margin: 0 0.25rem 0.25rem 0; font-size: 0.8rem; }
+    .tag.vermelho { background: var(--perigo-suave); color: var(--perigo); }
+    .tag.ok { background: var(--ok-suave); color: var(--ok); }
+    .tag.aviso { background: var(--alerta-suave); color: var(--alerta); }
+    button, .primario { background: var(--marca); color: white; border: 0; border-radius: 8px; padding: 0.55rem 0.9rem; font: inherit; cursor: pointer; }
+    button.secundario, a.secundario { background: white; color: var(--texto); border: 1px solid #cbd5e1; text-decoration: none; }
+    button[disabled] { background: #e7edf2; color: #64748b; cursor: not-allowed; }
+    input, select, textarea { font: inherit; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.45rem 0.6rem; background: white; color: var(--texto); }
+    label { display: block; margin: 0.55rem 0; }
+    .filtros, .acoes, .atalhos, .anos, .paginacao { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
+    .filtros { margin: 0.4rem 0 1rem; }
+    .atalhos a, .anos a, .paginacao a { text-decoration: none; border: 1px solid var(--linha); background: white; color: var(--texto); border-radius: 999px; padding: 0.35rem 0.75rem; }
+    .atalhos a.ativa, .anos a.com-pendencia { background: var(--marca-suave); border-color: #c5daf3; color: var(--marca); }
+    .anos { position: sticky; top: 0; z-index: 2; background: var(--fundo); padding: 0.45rem 0; margin-bottom: 0.4rem; }
+    .anos em { font-style: normal; font-weight: 700; }
+    .ano-secao, .cartao { scroll-margin-top: 3.4rem; }
+    .barra { height: 0.55rem; background: #e7edf2; border-radius: 999px; overflow: hidden; min-width: 7rem; }
+    .barra span { display: block; height: 100%; background: var(--marca); }
+    .abrir { font-weight: 650; white-space: nowrap; }
+    details { margin-top: 0.7rem; }
+    summary { cursor: pointer; color: var(--marca); }
+    .escolha { background: var(--ok-suave); border-radius: 8px; padding: 0.55rem 0.7rem; }
+    header form { margin: 0; }
+  </style>
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-linha">
+      <a class="marca" href="/fila">Coeficiente<small>Valores que entram no cálculo</small></a>
+      {% if usuario %}
+        <form class="busca-topo" method="get" action="/busca">
+          <input name="q" placeholder="Buscar ente ou código" aria-label="Buscar ente ou código" required>
+        </form>
+        <span class="quem">{{ usuario.nome }} · {{ usuario.perfil }}</span>
+        <form method="post" action="/sair"><button class="secundario" type="submit">Sair</button></form>
+      {% endif %}
+    </div>
+    {% if usuario %}
+      {% set caminho = request.url.path %}
+      <nav class="abas-linha abas">
+        <a href="/fila" class="{% if caminho == '/fila' %}ativa{% endif %}">Pendências</a>
+        <a href="/revisao" class="{% if caminho == '/revisao' %}ativa{% endif %}">Revisão</a>
+        <a href="/uf" class="{% if caminho.startswith('/uf') %}ativa{% endif %}">Cota por UF</a>
+        <a href="/painel" class="{% if caminho == '/painel' %}ativa{% endif %}">Andamento</a>
+        <a href="/bases" class="{% if caminho.startswith('/bases') or caminho.startswith('/apuracao') or caminho.startswith('/comparar') %}ativa{% endif %}">Base</a>
+        {% if usuario.perfil == "ADMINISTRADOR" %}
+          <a href="/regras" class="{% if caminho.startswith('/regras') %}ativa{% endif %}">Regras</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </header>
+  <main>
+    {% if aviso %}<p class="aviso">{{ aviso }}</p>{% endif %}
+    {% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
+    {% block corpo %}{% endblock %}
+  </main>
+</body>
+</html>

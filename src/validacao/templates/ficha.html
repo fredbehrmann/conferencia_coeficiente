@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block corpo %}
+{% macro cartao(bloco, ente_id, perfil) %}
+  <section class="cartao {% if bloco.vigente %}decidido{% elif bloco.aplicavel and not bloco.ausente %}pendente{% endif %}" id="{{ bloco.ano }}-{{ bloco.codigo }}">
+    <div class="cartao-topo">
+      <h3>{{ bloco.pergunta }}</h3>
+      <div>
+        {% if bloco.exige_revisao %}<span class="tag aviso">Confirmação exigida</span>{% endif %}
+        {% if bloco.vigente %}<span class="tag ok">decidido</span>{% elif bloco.aplicavel and not bloco.ausente %}<span class="tag aviso">sem decisão</span>{% endif %}
+      </div>
+    </div>
+    {% if not bloco.aplicavel %}
+      <p>Não se aplica.</p>
+    {% elif bloco.ausente %}
+      <p>Este ano não está na verificação.</p>
+    {% else %}
+      <p>
+        {% for situacao in bloco.situacoes %}
+          <span class="tag {% if situacao in bloco.graves %}vermelho{% elif situacao == 'fecha' %}ok{% else %}aviso{% endif %}">{{ situacao }}</span>
+        {% endfor %}
+      </p>
+      {% if bloco.sugerida %}
+        <p>Valor sugerido: <strong>{{ bloco.sugerida }}</strong> · {{ bloco.valor_sugerido | reais }}</p>
+      {% endif %}
+      {% if perfil == "ANALISTA" and bloco.pode_decidir %}
+        <div class="acoes">
+          <form method="post" action="/ente/{{ ente_id }}/decidir">
+            <input type="hidden" name="ano" value="{{ bloco.ano }}">
+            <input type="hidden" name="bloco" value="{{ bloco.codigo }}">
+            <input type="hidden" name="acao" value="USAR_SUGERIDA">
+            <button type="submit" {% if not bloco.pode_usar_sugerida %}disabled{% endif %}>
+              Usar {% if bloco.sugerida %}o {{ bloco.sugerida }}{% else %}a sugerida{% endif %}
+            </button>
+          </form>
+          <form method="post" action="/ente/{{ ente_id }}/decidir">
+            <input type="hidden" name="ano" value="{{ bloco.ano }}">
+            <input type="hidden" name="bloco" value="{{ bloco.codigo }}">
+            <input type="hidden" name="acao" value="TROCAR_FONTE">
+            <select name="fonte" aria-label="Fonte">
+              {% for fonte in bloco.fontes %}
+                <option value="{{ fonte.id }}" {% if fonte.bloqueada or not fonte.escolhivel %}disabled{% endif %}>
+                  {{ fonte.id }} — {{ fonte.valor | reais }}
+                </option>
+              {% endfor %}
+            </select>
+            <button class="secundario" type="submit">Trocar para a fonte escolhida</button>
+          </form>
+          {% if bloco.siconfi_bloqueado %}
+            <button type="button" disabled>Usar o SICONFI</button>
+          {% endif %}
+        </div>
+      {% endif %}
+      <div class="tabela">
+        <table>
+          <thead><tr><th>Fonte</th><th>Valor</th><th>Leitura</th></tr></thead>
+          <tbody>
+            {% for fonte in bloco.fontes if fonte.valor is not none %}
+              <tr class="{% if fonte.id == bloco.sugerida %}sugerida{% endif %}">
+                <td>{{ fonte.id }}{% if fonte.independencia %} <span class="mudo">· {{ fonte.independencia }}</span>{% endif %}{% if fonte.id == bloco.sugerida %} <span class="tag ok">sugerida</span>{% endif %}</td>
+                <td>{{ fonte.valor | reais }}</td>
+                <td>{{ fonte.frase }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if bloco.fontes | selectattr('valor', 'none') | list %}
+        <details>
+          <summary>Fontes sem valor</summary>
+          <div class="tabela">
+            <table>
+              <tbody>
+                {% for fonte in bloco.fontes if fonte.valor is none %}
+                  <tr>
+                    <td>{{ fonte.id }}{% if fonte.independencia %} <span class="mudo">· {{ fonte.independencia }}</span>{% endif %}</td>
+                    <td>{{ fonte.frase }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      {% endif %}
+      {% if bloco.vigente %}
+        <p class="escolha">Valor em uso: {{ bloco.vigente.valor | reais }}{% if bloco.vigente.fonte %} · {{ bloco.vigente.fonte }}{% endif %} · {{ bloco.vigente.acao }}, registrado por {{ bloco.vigente.usuario }} em {{ bloco.vigente.data }}.</p>
+      {% endif %}
+      {% if perfil == "ANALISTA" and bloco.pode_decidir %}
+        <form method="post" action="/ente/{{ ente_id }}/decidir">
+          <input type="hidden" name="ano" value="{{ bloco.ano }}">
+          <input type="hidden" name="bloco" value="{{ bloco.codigo }}">
+          <input type="hidden" name="acao" value="TIRAR_ANO">
+          <label>Motivo para tirar o ano <input name="motivo" required></label>
+          <button class="secundario" type="submit">Tirar o ano</button>
+        </form>
+        <details>
+          <summary>Informar outro valor</summary>
+          <form method="post" action="/ente/{{ ente_id }}/decidir">
+            <input type="hidden" name="ano" value="{{ bloco.ano }}">
+            <input type="hidden" name="bloco" value="{{ bloco.codigo }}">
+            <input type="hidden" name="acao" value="VALOR_DIGITADO">
+            <label>Valor <input name="valor" type="number" step="0.01" required></label>
+            <label>Motivo <input name="motivo" required></label>
+            <button class="secundario" type="submit">Gravar o valor digitado</button>
+          </form>
+        </details>
+      {% endif %}
+      {% if perfil == "REVISOR" and bloco.vigente and not bloco.vigente.data_revisao %}
+        <form method="post" action="/decisao/{{ bloco.vigente.id }}/confirmar">
+          <button type="submit">Confirmar esta decisão</button>
+        </form>
+      {% endif %}
+      {% if bloco.itens %}
+        <details>
+          <summary>Como o valor se abre</summary>
+          <ul>
+            {% for item in bloco.itens %}
+              <li>{{ item.item }} ({{ item.fonte }}): {{ item.valor | reais }} — {{ item.marca }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+      {% if bloco.trilha %}
+        <details>
+          <summary>Trilha</summary>
+          <ul>
+            {% for item in bloco.trilha %}
+              <li>
+                {{ item.data }} — {{ item.usuario }} — {{ item.acao }}
+                {% if item.fonte %} / {{ item.fonte }}{% endif %}
+                — anterior {{ item.valor_anterior | reais }} — escolhido {{ item.valor | reais }}
+                — {{ item.estado }}
+                {% if item.motivo %} — {{ item.motivo }}{% endif %}
+                {% if item.data_revisao %} — confirmada em {{ item.data_revisao }}{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+    {% endif %}
+  </section>
+{% endmacro %}
+
+<p class="mudo"><a href="/fila">Pendências</a> · decisão do valor</p>
+<h1>{{ ficha.curto }}</h1>
+<p class="lede">
+  {{ ficha.ente.esfera }} · {{ ficha.ente.uf }} · código {{ ficha.ente.id_ente }} · {{ ficha.ente.tribunal_competente }}.
+  {{ ficha.pendentes }} bloco{{ 's' if ficha.pendentes != 1 else '' }} ainda sem o valor que entra no cálculo.
+</p>
+{% if ficha.estado %}
+  <p><a href="/ente/{{ ficha.estado.id_ente }}">Cota repassada por {{ ficha.estado_curto }}</a></p>
+{% endif %}
+{% if ficha.ente.esfera == "ESTADO" %}
+  <p><a href="/ente/{{ ficha.ente.id_ente }}/municipios">Municípios de {{ ficha.curto }}</a></p>
+{% endif %}
+<nav class="anos">
+  {% for secao in ficha.secoes %}
+    <a href="#ano-{{ secao.ano }}" class="{% if secao.pendentes %}com-pendencia{% endif %}">
+      {{ secao.ano }}{% if secao.pendentes %} <em>{{ secao.pendentes }}</em>{% endif %}
+    </a>
+  {% endfor %}
+</nav>
+{% for secao in ficha.secoes %}
+  <section class="ano-secao" id="ano-{{ secao.ano }}">
+    <h2>{{ secao.ano }}</h2>
+    {% for bloco in secao.blocos if bloco.aplicavel and not bloco.ausente and not bloco.vigente %}
+      {{ cartao(bloco, ficha.ente.id_ente, usuario.perfil) }}
+    {% endfor %}
+    {% if secao.decididos %}
+      <details>
+        <summary>{{ secao.decididos }} valor{{ 'es' if secao.decididos != 1 else '' }} já escolhido{{ 's' if secao.decididos != 1 else '' }} em {{ secao.ano }}</summary>
+        {% for bloco in secao.blocos if bloco.vigente %}
+          {{ cartao(bloco, ficha.ente.id_ente, usuario.perfil) }}
+        {% endfor %}
+      </details>
+    {% endif %}
+    {% if secao.blocos | selectattr('aplicavel', 'equalto', false) | list or secao.blocos | selectattr('ausente') | list %}
+      <details>
+        <summary>O que não entra em {{ secao.ano }}</summary>
+        {% for bloco in secao.blocos if not bloco.aplicavel or bloco.ausente %}
+          {{ cartao(bloco, ficha.ente.id_ente, usuario.perfil) }}
+        {% endfor %}
+      </details>
+    {% endif %}
+  </section>
+{% endfor %}
+{% endblock %}

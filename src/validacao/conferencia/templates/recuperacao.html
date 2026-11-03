@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block titulo %}Recuperação de dados{% endblock %}
+{% block conteudo %}
+<form class="filtros" method="get" action="/recuperacao">
+  <div class="filtros-linha">
+    <div class="campo"><label for="r-comp">Componente</label><select id="r-comp" name="componente">{% for c in componentes %}<option value="{{ c.id }}" {{ 'selected' if f.componente == c.id }}>{{ c.nome }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="r-uf">UF</label><select id="r-uf" name="uf"><option value="">Todas</option>{% for uf in UFS %}<option {{ 'selected' if f.uf == uf }}>{{ uf }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="r-q">Ente ou código IBGE</label><input id="r-q" type="search" name="q" data-autocompletar-ente autocomplete="off" value="{{ f.q }}" placeholder="Digite o nome ou o código"></div>
+    <div class="campo"><label for="r-f">Mostrar</label><select id="r-f" name="filtro" style="max-width: 360px">{% for codigo, rotulo in FILTROS.items() %}<option value="{{ codigo }}" {{ 'selected' if f.filtro == codigo }}>{{ rotulo }}</option>{% endfor %}</select></div>
+    <button class="primario" type="submit">Aplicar</button>
+  </div>
+</form>
+
+<section class="bloco" aria-label="Resumo por fonte e exercício">
+  <h2>O que foi recuperado — {{ NOME_COMPONENTE.get(r.componente, r.componente) }}</h2>
+  <p class="sutil">Entes com valor (ou zero declarado) em cada fonte e exercício, sobre {{ r.universo|milhar }} entes da esfera. Para RREO e MSC, a linha de baixo mostra as consultas do pacote com sucesso.</p>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead><tr><th>Fonte</th>{% for a in r.exercicios %}<th class="num">{{ a }}{% if a not in r.exigiveis %}<div class="valor-meta">não exigível</div>{% endif %}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for d in r.colunas %}
+      <tr><td><b>{{ d|sigla }}</b></td>
+      {% for a in r.exercicios %}
+        {% set n = r.contagem.get(d, {}).get(a, 0) %}
+        {% set taxa = (n / r.universo) if r.universo else 0 %}
+        {% set c = r.consultas.get(d, {}).get(a) %}
+        <td class="cob {{ 'baixa' if n and taxa < 0.5 else ('media' if n and taxa < 0.95 else '') }}">
+          {% if n %}<b>{{ (taxa * 100)|round(1)|string|replace('.', ',') }}%</b><div class="barra" aria-hidden="true"><span style="width: {{ (taxa * 100)|round(1) }}%"></span></div>{% else %}<span class="sutil">—</span>{% endif %}
+          {% if c %}<div class="valor-meta" title="Consultas do pacote: {{ c.ok }} com sucesso de {{ c.total }}">{{ c.ok|milhar }}/{{ c.total|milhar }} consultas{% if c.total - c.ok %} · <span style="color: var(--g4)">{{ (c.total - c.ok)|milhar }} falhas</span>{% endif %}</div>{% endif %}
+        </td>
+      {% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="bloco" aria-label="Recuperação por ente">
+  <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px">
+    <h2>Por ente <span class="sutil" style="font-weight: 400">· {{ r.total|milhar }} entes · página {{ r.pagina }} de {{ r.paginas }}</span></h2>
+    <ul class="legenda-rec" aria-label="Legenda">
+      {% for codigo, (rotulo, classe) in ESTADOS_CELULA.items() %}<li><i class="rq {{ classe }}" aria-hidden="true">{{ codigo if codigo in ('E', 'A', 'I') else '' }}</i>{{ rotulo }}</li>{% endfor %}
+    </ul>
+  </div>
+  <div class="tabela-quadro" style="max-height: none">
+  <table class="tabela-simples recuperacao">
+    <thead>
+      <tr><th>Ente</th><th>UF</th>{% for d in r.colunas %}<th class="centro">{{ d|sigla }}<div class="valor-meta">{{ r.exercicios[0] }}–{{ r.exercicios[-1] }}</div></th>{% endfor %}<th>Pacote SICONFI</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for l in r.linhas %}
+      <tr>
+        <td><b title="{{ l.ente.nome }}">{{ nome_ente(l.ente.nome, l.ente.uf)|truncate(34, true, '…', 0) }}</b><div class="valor-meta mono">{{ l.ente.id_ente }}</div></td>
+        <td>{{ l.ente.uf }}</td>
+        {% for d in r.colunas %}
+          <td class="centro"><span class="fila-anos">{% for c in l.celulas[d] %}{% set e = ESTADOS_CELULA[c.codigo] %}<i class="rq {{ e[1] }}" title="{{ d|sigla }} {{ c.ano }}: {{ e[0] }}{{ ' — ' ~ c.titulo if c.titulo }}">{{ c.codigo if c.codigo in ('E', 'A', 'I') else '' }}</i>{% endfor %}</span></td>
+        {% endfor %}
+        <td style="font-size: 11.5px">{% for s, n in l.pacote.items() %}<span class="comp {{ 'ok' if s == 'OK' else ('nao' if s in ('INCOMPLETO', 'FONTE_PARCIAL') else 'ressalva') }}" title="{{ n }} exercício(s)">{{ s|lower|replace('_', ' ') }} {{ n }}</span> {% else %}<span class="sutil">—</span>{% endfor %}</td>
+        <td><a class="botao pequeno" href="/?enviado=1&q={{ l.ente.id_ente }}&componente={{ r.componente }}&somente_alerta=">Casos</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ 4 + r.colunas|length }}" class="sutil">Nenhum ente com estes filtros.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="paginacao">
+    {% if r.pagina > 1 %}<a class="botao pequeno" href="/recuperacao?{{ base_q }}&pagina={{ r.pagina - 1 }}">← Anterior</a>{% endif %}
+    {% if r.pagina < r.paginas %}<a class="botao pequeno" href="/recuperacao?{{ base_q }}&pagina={{ r.pagina + 1 }}">Próxima →</a>{% endif %}
+    <span class="sutil">Cada quadrado é um exercício ({{ r.exercicios[0] }} a {{ r.exercicios[-1] }}, da esquerda para a direita). Passe o mouse para ver o detalhe.</span>
+  </div>
+</section>
+{% endblock %}

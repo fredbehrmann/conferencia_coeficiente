@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block corpo %}
+<section class="cartao" style="max-width: 28rem; margin-top: 2rem;">
+  <h1>Quem está decidindo</h1>
+  <p class="lede">O nome fica na trilha de cada valor escolhido.</p>
+  <form method="post" action="/login">
+    <label>Nome <input name="nome" required autofocus></label>
+    <label>Perfil
+      <select name="perfil">
+        <option value="ANALISTA">Analista — escolhe o valor de cada bloco</option>
+        <option value="REVISOR">Revisor — confirma a decisão de outra pessoa</option>
+        <option value="ADMINISTRADOR">Administrador — recarrega as fontes e muda a regra</option>
+      </select>
+    </label>
+    <button type="submit">Entrar</button>
+  </form>
+</section>
+{% endblock %}

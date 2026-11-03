@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Regra vigente</h1>
+<p>Vigente desde {{ regra.vigente_desde }}.</p>
+<form method="post" action="/regras/prever">
+  <label><input type="checkbox" name="fundeb_permanece" {% if params.fundeb_permanece %}checked{% endif %}> FUNDEB permanece no valor</label>
+  <label><input type="checkbox" name="compensacao_soma" {% if params.compensacao_soma %}checked{% endif %}> Compensação soma ao ISS e à cota</label>
+  <label><input type="checkbox" name="iss_simples_soma" {% if params.iss_simples_soma %}checked{% endif %}> ISS do Simples soma ao ISS</label>
+  <label>Igualdade absoluta (R$) <input name="igualdade_absoluta" value="{{ params.igualdade_absoluta }}" required></label>
+  <label>Igualdade relativa <input name="igualdade_relativa" value="{{ params.igualdade_relativa }}" required></label>
+  <label>Aceite sugerido <input name="aceite_sugerido" value="{{ params.aceite_sugerido }}" required></label>
+  <label>Entrada na fila acima de <input name="fila_obrigatoria" value="{{ params.fila_obrigatoria }}" required></label>
+  <label>Líquido de FUNDEB, mínimo <input name="fundeb_liquido_min" value="{{ params.fundeb_liquido_min }}" required></label>
+  <label>Líquido de FUNDEB, máximo <input name="fundeb_liquido_max" value="{{ params.fundeb_liquido_max }}" required></label>
+  <label>Salto mínimo <input name="salto_min" value="{{ params.salto_min }}" required></label>
+  <label>Salto máximo <input name="salto_max" value="{{ params.salto_max }}" required></label>
+  <label>Revisão a partir de (R$) <input name="revisao_corte" value="{{ params.revisao_corte or '' }}"></label>
+  <fieldset>
+    <legend>Anos</legend>
+    {% for ano in anos_possiveis %}
+      <label><input type="checkbox" name="anos" value="{{ ano }}" {% if ano in params.anos %}checked{% endif %}> {{ ano }}</label>
+    {% endfor %}
+  </fieldset>
+  <button type="submit">Calcular quantos blocos entram ou saem</button>
+</form>
+<h2>Fontes</h2>
+<form method="post" action="/carregar">
+  <p>Relê as quatro planilhas da pasta e reabre só o bloco cujo valor decidido mudou.</p>
+  <button class="secundario" type="submit">Recarregar planilhas</button>
+</form>
+<form method="post" action="/complementar">
+  <p>Baixa e carrega as fontes complementares, reprocessa e reabre só o bloco cujo total decidido mudou.</p>
+  <button class="secundario" type="submit">Carregar fontes complementares</button>
+</form>
+{% endblock %}

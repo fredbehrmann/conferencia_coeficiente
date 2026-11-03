@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Coeficientes da base {{ base.id }}</h1>
+<p>Fórmula {{ formula.id }} — {{ formula.descricao }}. Hash {{ base.hash }}.</p>
+{% if usuario.perfil == "ADMINISTRADOR" and not coeficientes %}
+  <form method="post" action="/apuracao/{{ base.id }}">
+    <button type="submit">Apurar</button>
+  </form>
+{% endif %}
+<table>
+  <thead><tr><th>Ente</th><th>Esfera</th><th>Coeficiente</th></tr></thead>
+  <tbody>
+    {% for apuracao, ente in coeficientes %}
+      <tr>
+        <td><a href="/apuracao/{{ base.id }}/ente/{{ ente.id_ente }}">{{ ente.nome }}</a></td>
+        <td>{{ ente.esfera }}</td>
+        <td>{{ apuracao.coeficiente }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3">Esta base ainda não foi apurada.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

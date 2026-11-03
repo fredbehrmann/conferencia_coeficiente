@@ -1,0 +1,8 @@
+<div class="detalhe">
+  <div style="display: flex; gap: 12px; align-items: baseline; margin-bottom: 6px">
+    <b>Registros de {{ caso.nome_ente }} em {{ caso.exercicio }}</b>
+    <span class="sutil">por fonte e versão · versões substituídas em cinza</span>
+    <a href="#" data-analisar="{{ caso.id }}">Abrir análise completa →</a>
+  </div>
+  {% include "_registros_tabela.html" %}
+</div>

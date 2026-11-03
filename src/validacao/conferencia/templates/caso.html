@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block titulo %}{{ caso.nome_ente }} {{ caso.exercicio }}{% endblock %}
+{% block conteudo %}
+<p><a href="/{{ ('?' ~ voltar) if voltar else '' }}">← Voltar à central</a></p>
+<div class="caso-pagina">
+{% include "_caso.html" %}
+</div>
+{% endblock %}

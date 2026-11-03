@@ -1,0 +1,71 @@
+{# Composição do valor de uma fonte: parcelas, conta até o líquido e medidas usadas na comparação #}
+{% set k = comp %}
+<div class="composicao">
+  {% if k.erro %}<p class="sutil">Não foi possível montar a composição: {{ k.erro }}</p>{% else %}
+  <div class="composicao-grade">
+    <div>
+      <div class="composicao-titulo">Como se chega ao valor</div>
+      {% if k.sem_abertura %}
+        <p class="sutil" style="margin: 2px 0 6px">A fonte informa só o total, sem bruto nem deduções em separado.</p>
+      {% endif %}
+      <table class="tabela-simples compacta conta">
+        <tbody>
+        {% for l in k.linhas %}
+          <tr><td class="sinal">{{ l.sinal }}</td><td>{{ l.rotulo }}<div class="valor-meta mono">{{ l.campo }}</div></td><td class="num">{{ l.valor|reais2 }}</td><td class="pequeno">{{ l.origem }}</td></tr>
+        {% endfor %}
+        {% for l in k.conta %}
+          <tr class="{{ 'resultado' if l.destaque else 'subtotal' }}"><td class="sinal">{{ l.sinal }}</td><td>{{ l.rotulo }}</td><td class="num">{{ l.valor|reais2 }}</td><td></td></tr>
+        {% endfor %}
+        {% if k.declarado %}
+          <tr class="declarado"><td class="sinal" aria-hidden="true">▪</td><td>{{ k.declarado.rotulo }}<div class="valor-meta mono">{{ k.declarado.campo }}</div></td><td class="num">{{ k.declarado.valor|reais2 if k.declarado.valor is not none else '—' }}</td><td class="pequeno">{{ k.declarado.origem }}</td></tr>
+        {% endif %}
+        </tbody>
+      </table>
+      {% if k.conferencia %}<p class="conferencia {{ 'ok' if 'confere' in k.conferencia or 'coincide' in k.conferencia else 'difere' }}">{{ k.conferencia }}</p>{% endif %}
+
+      {% if k.fundeb %}
+      <div class="composicao-titulo" style="margin-top: 8px">FUNDEB (não entra no líquido acima)</div>
+      <table class="tabela-simples compacta conta"><tbody>
+        {% for l in k.fundeb %}<tr><td class="sinal">−</td><td>{{ l.rotulo }}<div class="valor-meta mono">{{ l.campo }}</div></td><td class="num">{{ l.valor|reais2 }}</td><td class="pequeno">{{ l.origem }}</td></tr>{% endfor %}
+        {% if k.liquido_fundeb_calculado is not none %}<tr class="subtotal"><td class="sinal">=</td><td>Líquido também do FUNDEB (calculado)</td><td class="num">{{ k.liquido_fundeb_calculado|reais2 }}</td><td></td></tr>{% endif %}
+        {% if k.declarado_fundeb %}<tr class="declarado"><td class="sinal" aria-hidden="true">▪</td><td>{{ k.declarado_fundeb.rotulo }}<div class="valor-meta mono">{{ k.declarado_fundeb.campo }}</div></td><td class="num">{{ k.declarado_fundeb.valor|reais2 }}</td><td class="pequeno">{{ k.declarado_fundeb.origem }}</td></tr>{% endif %}
+      </tbody></table>
+      {% endif %}
+
+      {% if k.informativas %}
+      <div class="composicao-titulo" style="margin-top: 8px">Informativos (não alteram o valor)</div>
+      <table class="tabela-simples compacta conta"><tbody>
+        {% for l in k.informativas %}<tr><td class="sinal">i</td><td>{{ l.rotulo }}<div class="valor-meta mono">{{ l.campo }}</div></td><td class="num">{{ l.valor|reais2 }}</td><td class="pequeno">{{ l.origem }}</td></tr>{% endfor %}
+      </tbody></table>
+      {% endif %}
+
+      {% if k.extra and k.extra.tipo == 'msc' %}
+      <div class="composicao-titulo" style="margin-top: 8px">MSC — soma dos lançamentos por conta contábil ({{ k.extra.lancamentos|milhar }} lançamentos{% if k.extra.tipos_valor %}, {{ k.extra.tipos_valor|join(', ') }}{% endif %})</div>
+      <table class="tabela-simples compacta conta"><tbody>
+        {% for c in k.extra.contas %}
+          <tr><td class="sinal">{{ '−' if c.valor < 0 else '+' }}</td><td>{{ c.rotulo }}<div class="valor-meta">{{ c.n }} lançamento(s) · naturezas {% for nat, v in c.naturezas %}<span class="mono">{{ nat }}</span> {{ v|reais2 }}{{ '; ' if not loop.last }}{% endfor %}</div></td><td class="num">{{ c.valor|reais2 }}</td><td></td></tr>
+        {% endfor %}
+        <tr class="resultado"><td class="sinal">=</td><td>Soma de valor_sinalizado</td><td class="num">{{ k.extra.total|reais2 }}</td><td></td></tr>
+      </tbody></table>
+      {% elif k.extra and k.extra.tipo == 'rreo' %}
+      <div class="composicao-titulo" style="margin-top: 8px">RREO — linha de origem</div>
+      <table class="tabela-simples compacta conta"><tbody>
+        {% for l in k.extra.linhas %}<tr><td class="sinal">■</td><td>{{ l.rotulo }}<div class="valor-meta mono">{{ l.conta }} · {{ l.anexo }} · {{ l.coluna }}</div></td><td class="num">{{ l.valor|reais2 }}</td><td class="pequeno">A conta já vem líquida de deduções, exceto transferências e FUNDEB; o RREO não traz bruto e deduções em separado.</td></tr>{% endfor %}
+      </tbody></table>
+      {% endif %}
+    </div>
+
+    <div>
+      <div class="composicao-titulo">Medidas disponíveis para comparar</div>
+      <ul class="medidas">
+        {% for m in k.medidas %}<li><b>{{ m.conceito[:1]|upper ~ m.conceito[1:] }}</b>: {{ m.valor|reais2 }}<div class="valor-meta">{{ m.derivacao }}</div></li>{% else %}<li class="sutil">Nenhuma medida com valor.</li>{% endfor %}
+      </ul>
+      {% if k.usado %}
+      <div class="composicao-titulo" style="margin-top: 8px">{{ 'Valor de referência' if k.usado.referencia else 'Usado na comparação com a referência' }}</div>
+      <p style="margin: 2px 0"><b>{{ k.usado.valor|reais2 }}</b>{% if k.usado.parcela %} <span class="sutil">· parcela: {{ k.usado.parcela }}</span>{% endif %}</p>
+      {% if k.usado.derivacao and k.usado.derivacao != 'valor declarado' %}<p class="sutil" style="margin: 0">{{ k.usado.derivacao }}</p>{% endif %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

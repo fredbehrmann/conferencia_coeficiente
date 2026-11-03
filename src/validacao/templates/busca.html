@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Buscar ente</h1>
+<form method="get" action="/busca">
+  <label>Nome ou código <input name="q" value="{{ termo }}" required autofocus></label>
+  <button type="submit">Abrir</button>
+</form>
+{% if termo %}
+  <div class="tabela">
+    <table>
+      <thead><tr><th>Ente</th><th>Esfera</th><th>UF</th><th>Código</th></tr></thead>
+      <tbody>
+        {% for ente in entes %}
+          <tr>
+            <td><a href="/ente/{{ ente.id_ente }}">{{ ente.nome }}</a></td>
+            <td>{{ ente.esfera }}</td>
+            <td>{{ ente.uf }}</td>
+            <td>{{ ente.id_ente }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4">Nenhum ente encontrado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

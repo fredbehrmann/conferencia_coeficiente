@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block corpo %}
+<h1>Comparação</h1>
+<p>Base {{ a }} e base {{ b }}.</p>
+<table>
+  <thead><tr><th>Ente</th><th>Coeficiente A</th><th>Coeficiente B</th><th>Decisões</th></tr></thead>
+  <tbody>
+    {% for item in mudancas %}
+      <tr>
+        <td><a href="/ente/{{ item.id_ente }}">{{ item.id_ente }}</a></td>
+        <td>{{ item.coeficiente_a }}</td>
+        <td>{{ item.coeficiente_b }}</td>
+        <td>
+          {% for decisao in item.decisoes %}
+            {{ decisao.ano }} {{ decisao.bloco }}: {{ decisao.decisao_a }} → {{ decisao.decisao_b }}<br>
+          {% endfor %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4">Nenhum coeficiente mudou.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

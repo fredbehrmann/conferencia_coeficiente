@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block titulo %}Importar{% endblock %}
+{% block conteudo %}
+{% set ROTULO_DECL = {'SICONFI_RREO': 'RREO', 'SICONFI_MSC': 'MSC'} %}
+<section class="bloco pacote">
+  <div class="pacote-cabeca">
+    <div>
+      <h2 style="margin-bottom: 2px">RREO e MSC do SICONFI</h2>
+      <p class="sutil" style="margin: 0">Pasta <span class="mono">{{ pasta_pacote }}</span></p>
+    </div>
+    <div class="pacote-acao">
+      {% if sp %}
+        {% if sp.etapa == 'pronto' %}<span class="selo ok">✓ Importado e validado</span>
+        {% elif sp.etapa == 'atualizar' %}<span class="selo atencao">Há arquivos mais novos que a última importação</span>
+        {% elif sp.etapa == 'validar' %}<span class="selo atencao">Importado, falta validar</span>
+        {% elif sp.etapa == 'importar' %}<span class="selo atencao">Ainda não importado</span>
+        {% else %}<span class="selo">Arquivos não encontrados</span>{% endif %}
+      {% endif %}
+      {% if sp and sp.etapa == 'validar' %}
+      <button class="primario" type="button" data-validar>Validar agora</button>
+      {% else %}
+      <button class="{{ 'primario' if not sp or sp.etapa in ('importar', 'atualizar') else '' }}" type="button" data-importar-siconfi {{ 'disabled' if not pacote[0].presente }}>
+        {{ 'Importar e validar' if not sp or sp.etapa in ('importar', 'sem_arquivos') else ('Importar novamente e validar' if sp.etapa == 'atualizar' else 'Reimportar e validar') }}
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="progresso-importacao" data-progresso hidden role="status" aria-live="polite">
+    <div class="barra-indeterminada" aria-hidden="true"><span></span></div>
+    <div data-progresso-texto>Iniciando…</div>
+    <div class="sutil">Leva alguns minutos (a MSC tem mais de 300 mil lançamentos). Pode continuar usando as outras telas; esta página atualiza sozinha ao terminar.</div>
+  </div>
+
+  {% if sp %}
+  <ol class="etapas" aria-label="Etapas">
+    <li class="{{ 'feita' if sp.presentes else '' }}">
+      <b>1. Arquivos na pasta</b>
+      <span>{{ sp.presentes }} de {{ sp.esperados }} encontrados{% if sp.arquivos_em %} · gerados até {{ sp.arquivos_em|datahora }}{% endif %}</span>
+    </li>
+    <li class="{{ 'feita' if sp.lotes and not sp.desatualizado else ('pendente' if sp.presentes else '') }}">
+      <b>2. Importação</b>
+      <span>{% if sp.lotes %}em {{ sp.importado_em|datahora if sp.importado_em else '—' }} · lotes {% for l in sp.lotes %}{{ l.id }}{{ ', ' if not loop.last }}{% endfor %}{% if sp.desatualizado %} · <b>arquivos mudaram depois</b>{% endif %}{% else %}ainda não feita{% endif %}</span>
+    </li>
+    <li class="{{ 'feita' if sp.validado else ('pendente' if sp.lotes else '') }}">
+      <b>3. Validação</b>
+      <span>{% if sp.validado %}nº {{ sp.execucao.id }} em {{ sp.execucao.concluida_em|datahora }} — já usa os dados importados{% elif sp.lotes %}a última validação é anterior à importação{% else %}—{% endif %}</span>
+    </li>
+  </ol>
+
+  {% if sp.componentes %}
+  <h3 style="margin-top: 14px">O que entrou no sistema</h3>
+  <p class="sutil">Um registro por ente, exercício e componente, para cada declaração. RREO e MSC são do mesmo declarante da DCA (SICONFI): servem para conferir a DCA e substituí-la quando ela falta, mas não contam como validação independente.</p>
+  <div style="overflow-x: auto">
+  <table class="tabela-simples">
+    <thead>
+      <tr><th rowspan="2">Componente</th><th colspan="4" class="centro grupo">RREO (Anexo 3, últimos 12 meses)</th><th colspan="4" class="centro grupo">MSC (dezembro, encerramento)</th></tr>
+      <tr><th class="num">Com valor</th><th class="num">Sem valor</th><th class="num">Igual à DCA</th><th class="num">Divergem</th>
+          <th class="num">Com valor</th><th class="num">Sem valor</th><th class="num">Igual à DCA</th><th class="num">Divergem</th></tr>
+    </thead>
+    <tbody>
+    {% for comp in sp.componentes %}
+      <tr>
+        <td><b>{{ NOME_COMPONENTE.get(comp, comp) }}</b></td>
+        {% for decl in ('SICONFI_RREO', 'SICONFI_MSC') %}
+          {% set reg = sp.registros[comp].get(decl, {}) %}
+          {% set con = sp.concordancia.get(comp, {}).get(decl) %}
+          {% set div = sp.divergencias.get((comp, decl), 0) %}
+          <td class="num">{{ ((reg.get('VALOR', 0)) + (reg.get('ZERO', 0)))|milhar }}</td>
+          <td class="num">{{ reg.get('AUSENTE', 0)|milhar if reg.get('AUSENTE') else '—' }}</td>
+          <td class="num">{% if con and con.taxa is not none %}<b>{{ (con.taxa * 100)|round(1)|string|replace('.', ',') }}%</b><div class="valor-meta">{{ con.concordantes|milhar }} de {{ con.comparaveis|milhar }}</div>{% else %}<span class="sutil">—</span>{% endif %}</td>
+          <td class="num">{% if div %}<a href="/?enviado=1&componente={{ comp }}&tipo=DSI&fonte={{ decl }}" title="Abrir na Central os casos em que a {{ ROTULO_DECL[decl] }} diverge da DCA">{{ div|milhar }} →</a>{% else %}<span class="sutil">0</span>{% endif %}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="sutil" style="margin-top: 6px">"Igual à DCA": dentro das tolerâncias da regra DSI, entre os casos em que as duas fontes têm valor. Nos casos em que a DCA não tem valor, o RREO passa a ser a referência (precedência DCA → RREO, configurável em Regras). Por ente, veja <a href="/recuperacao">Recuperação de dados</a>.</p>
+  {% endif %}
+
+  {% set dg = sp.diagnostico %}
+  {% if dg and dg.observacoes %}
+  <h3 style="margin-top: 14px">Conferência dos arquivos</h3>
+  <ul class="observacoes">
+    {% for nivel, texto in dg.observacoes %}<li class="{{ nivel }}"><span aria-hidden="true">{{ {'ok': '✓', 'alerta': '!', 'info': 'i'}.get(nivel, '·') }}</span>{{ texto }}</li>{% endfor %}
+  </ul>
+  {% if dg.falhas %}
+  <details><summary>Consultas que falharam ({{ dg.falhas|length }})</summary>
+    <table class="tabela-simples compacta"><thead><tr><th>Fonte</th><th>Ente</th><th>IBGE</th><th>Exercício</th><th>Erro</th></tr></thead>
+    <tbody>{% for f in dg.falhas %}<tr><td>{{ f.fonte|upper }}</td><td>{{ f.ente }}</td><td class="mono">{{ f.cod_ibge }}</td><td>{{ f.ano }}</td><td class="pequeno">{{ f.erro }}</td></tr>{% endfor %}</tbody></table>
+  </details>
+  {% endif %}
+  <details><summary>Como os arquivos foram lidos</summary>
+    <div class="regra-det">
+      <div><b>base_validacao_coeficiente.csv</b> ({{ (dg.arquivos.base.linhas or 0)|milhar if dg.arquivos and dg.arquivos.base }} linhas): uma linha por ente × exercício × componente{% if dg.exercicios %}, exercícios {{ dg.exercicios[0] }}–{{ dg.exercicios[-1] }}{% endif %}. <span class="mono">valor_rreo</span> e <span class="mono">valor_msc</span> viram os registros das declarações RREO e MSC. Componentes: ISS e COTA_PARTE_ICMS dos municípios (M), ICMS dos estados (E), ISS e ICMS do DF (D). Linhas SEM_RREO/SEM_MSC entram como "registro sem valor"; *_NAO_SOLICITADO não entram.</div>
+      {% if dg.rreo %}<div><b>rreo_coeficiente.csv</b> ({{ (dg.arquivos.rreo.linhas or 0)|milhar }} linhas): contas {% for k, v in dg.rreo.contas.items() %}<span class="mono">{{ k }}</span> ({{ v|milhar }}){{ ', ' if not loop.last }}{% endfor %}; coluna {% for k in dg.rreo.colunas %}"{{ k }}"{% endfor %}; {% for k in dg.rreo.anexos %}{{ k }}{% endfor %}. Usado na procedência e no painel do caso.</div>{% endif %}
+      {% if dg.msc %}<div><b>msc_coeficiente.csv</b> ({{ (dg.arquivos.msc.linhas or 0)|milhar }} lançamentos): matriz {% for k in dg.msc.matrizes %}{{ k }}{% endfor %}, mês {% for k in dg.msc.meses %}{{ k }}{% endfor %}; contas {% for k, v in dg.msc.contas.items() %}<span class="mono">{{ k }}</span> ({{ v|milhar }}){{ ', ' if not loop.last }}{% endfor %}. Valor por caso = soma de <span class="mono">valor_sinalizado</span> (receita realizada menos deduções). Tipo de saldo por caso: {% for k, v in dg.msc.tipos_valor_por_caso.items() %}{{ k }} {{ v|milhar }}{{ '; ' if not loop.last }}{% endfor %}.</div>{% endif %}
+      {% if dg.cobertura %}<div><b>cobertura.csv</b>: {% for k, v in dg.cobertura.items() %}{{ k|lower|replace('_', ' ') }} {{ v|milhar }}{{ '; ' if not loop.last }}{% endfor %} (ente × exercício). <b>status.csv</b>: situação de cada consulta, usada no painel de recuperação.</div>{% endif %}
+      <div class="sutil">Conferência feita em {{ dg.gerado_em }}.</div>
+    </div>
+  </details>
+  {% elif sp.lotes %}
+  <p class="sutil" style="margin-top: 10px">A conferência detalhada dos arquivos aparece aqui a partir da próxima importação.</p>
+  {% endif %}
+
+  <details style="margin-top: 10px"><summary>Arquivos procurados</summary>
+    <table class="tabela-simples compacta" style="max-width: 760px">
+      <thead><tr><th>Arquivo</th><th>Situação</th><th class="num">Tamanho</th><th>Modificado</th></tr></thead>
+      <tbody>{% for a in pacote %}<tr><td class="mono">{{ a.nome }}</td><td>{% if a.presente %}<span class="comp ok">encontrado</span>{% else %}<span class="comp vazio">{{ 'ausente (obrigatório)' if loop.first else 'ausente' }}</span>{% endif %}</td><td class="num">{{ ((a.tamanho / 1048576)|round(1)|string|replace('.', ',') ~ ' MB') if a.presente }}</td><td>{{ a.modificado|datahora if a.presente }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <p class="sutil">Reimportar os mesmos arquivos não duplica nada. Se um valor mudar, é criada uma nova versão do registro e a anterior é preservada; casos já decididos voltam como "reanálise necessária".</p>
+  </details>
+  {% endif %}
+</section>
+
+<details class="bloco outras-planilhas" {{ 'open' if erro }}>
+  <summary><b>Importar outra planilha (CSV ou XLSX avulso)</b> <span class="sutil">— para fontes fora do pacote, como uma nova extração do SIOPE ou do TCE</span></summary>
+  <div class="colunas2" style="margin-top: 10px">
+    <section>
+      <h3>1. Escolha o arquivo</h3>
+      <p class="sutil">Na etapa seguinte você verá a prévia, escolherá a aba, a linha de cabeçalho e o significado de cada coluna.</p>
+      <form method="post" action="/importar/arquivo" enctype="multipart/form-data">
+        <input type="file" name="arquivo" accept=".csv,.txt,.xlsx,.xlsm" required>
+        <button class="primario" type="submit">Ler arquivo e ver prévia</button>
+      </form>
+    </section>
+    <section>
+      <h3>Como a importação protege os dados</h3>
+      <ul style="margin: 0; padding-left: 18px">
+        <li>O mesmo conteúdo não é importado de novo.</li>
+        <li>Valor diferente cria <b>nova versão</b> e preserva a anterior.</li>
+        <li>Decisões não são sobrescritas; se a evidência mudar, o caso volta para <b>reanálise</b>.</li>
+        <li>Zero, célula vazia e formato inválido ficam registrados como estados distintos.</li>
+      </ul>
+    </section>
+  </div>
+</details>
+
+<details class="bloco">
+  <summary><b>Histórico de importações</b> <span class="sutil">— {{ lotes|length }} lote(s)</span></summary>
+  <div style="overflow-x: auto; margin-top: 8px">
+  <table class="tabela-simples">
+    <thead><tr><th>Lote</th><th>Fonte</th><th>Origem</th><th>Arquivo / aba</th><th>Extração</th><th>Importado em</th><th>Por</th><th class="num">Lidos</th><th class="num">Novos</th><th class="num">Versões</th><th class="num">Iguais</th><th class="num">Ocorrências</th></tr></thead>
+    <tbody>
+    {% for l in lotes %}
+      <tr>
+        <td><a href="/importar/lote/{{ l.id }}">{{ l.id }}</a>{% if l.ficticio %} <span class="hipotese">fictício</span>{% endif %}</td>
+        <td>{{ l.declaracao_id|sigla }}</td>
+        <td>{{ {'MIGRACAO': 'Migrado da v1', 'ARQUIVO': 'Arquivo', 'API': 'API'}.get(l.origem_tipo, l.origem_tipo) }}</td>
+        <td style="font-size: 12px; max-width: 360px; overflow-wrap: anywhere">{{ l.arquivo|nome_arquivo }}{% if l.aba %} · {{ l.aba }}{% endif %}</td>
+        <td>{{ l.data_extracao|data }}</td>
+        <td>{{ l.data_importacao|datahora }}</td>
+        <td>{{ l.usuario }}</td>
+        <td class="num">{{ l.lidos|milhar }}</td><td class="num">{{ l.novos|milhar }}</td><td class="num">{{ l.novas_versoes|milhar }}</td><td class="num">{{ l.repetidos|milhar }}</td><td class="num">{{ l.erros|milhar }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="12" class="sutil">Nenhum lote.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+{% endblock %}
