@@ -496,9 +496,31 @@ def criar_app(banco: Path | None = None) -> FastAPI:
 
             arquivos_pacote = descrever(pasta_pacote())
             return pagina(request, "importar.html", session, usuario, aba="importar", lotes=lotes,
+                          bases=_situacao_bases(session), ultima_bases=_ultima_importacao_bases(),
                           pacote=arquivos_pacote, pasta_pacote=str(pasta_pacote()),
                           pacote_info=configuracao(session, "pacote_siconfi"),
                           sp=situacao_pacote(session, arquivos_pacote), **_catalogos(session))
+
+    def _situacao_bases(session):
+        from validacao.conferencia.bases_fixas import LAYOUTS, ORDEM
+
+        situacao = []
+        for fonte in ORDEM:
+            layout = LAYOUTS[fonte]
+            ultimo = session.scalar(select(cf.Lote).where(cf.Lote.declaracao_id == layout["declaracao"],
+                                                          cf.Lote.situacao == "CONCLUIDO",
+                                                          cf.Lote.origem_tipo.in_(("ARQUIVO", "MIGRACAO")))
+                                    .order_by(cf.Lote.id.desc()).limit(1))
+            vigentes = session.scalar(select(func.count()).select_from(cf.Registro).where(
+                cf.Registro.declaracao_id == layout["declaracao"], cf.Registro.vigente.is_(True)))
+            situacao.append({"fonte": fonte, **layout, "lote": ultimo, "vigentes": vigentes or 0})
+        return situacao
+
+    def _ultima_importacao_bases():
+        for dados in tarefas.listar(destino):
+            if dados.get("tipo") == "importar_bases":
+                return dados
+        return None
 
     @app.post("/importar/arquivo", response_class=HTMLResponse)
     async def importar_arquivo(request: Request, arquivo: UploadFile = File(...)):
@@ -654,6 +676,39 @@ def criar_app(banco: Path | None = None) -> FastAPI:
         except tarefas.Ocupado as erro:
             return JSONResponse({"ok": False, "erro": str(erro)}, status_code=409)
         return JSONResponse({"ok": True, "tarefa": tarefa_id})
+
+    @app.post("/importar/bases")
+    async def importar_bases(request: Request):
+        """Recebe as planilhas de layout fixo (DCA, SIOPE, SIOPS, TCE) e importa em segundo plano."""
+        from validacao.conferencia import bases_fixas
+
+        formulario = await request.form()
+        enviados = [f for f in formulario.getlist("arquivos") if getattr(f, "filename", "")]
+        with sessao() as session:
+            usuario = exigir(request, session)
+            nome_usuario = usuario.nome
+        if not enviados:
+            return JSONResponse({"ok": False, "erro": "Escolha ao menos uma planilha."}, status_code=400)
+        arquivos = [(f.filename, await f.read()) for f in enviados]
+        try:
+            ordenados = bases_fixas.ordenar(arquivos)  # recusa já aqui o que não for reconhecido
+        except bases_fixas.LayoutDesconhecido as erro:
+            return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+        pendentes = pasta_importacoes / "pendentes"
+        pendentes.mkdir(parents=True, exist_ok=True)
+        lista = []
+        for fonte, nome, conteudo in ordenados:
+            caminho = pendentes / f"base-{secrets.token_hex(6)}-{fonte}.xlsx"
+            caminho.write_bytes(conteudo)
+            lista.append({"nome": nome, "caminho": str(caminho), "fonte": fonte})
+        try:
+            tarefa_id = tarefas.iniciar(destino, "importar_bases", {"arquivos": lista}, nome_usuario)
+        except tarefas.Ocupado as erro:
+            for item in lista:
+                Path(item["caminho"]).unlink(missing_ok=True)
+            return JSONResponse({"ok": False, "erro": str(erro)}, status_code=409)
+        return JSONResponse({"ok": True, "tarefa": tarefa_id,
+                             "reconhecidos": [bases_fixas.LAYOUTS[f]["nome"] for f, _n, _c in ordenados]})
 
     @app.post("/importar/siconfi")
     def importar_siconfi(request: Request):

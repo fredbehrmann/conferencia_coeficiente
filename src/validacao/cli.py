@@ -88,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
     pacote_cmd.add_argument("--sem-validar", action="store_true", help="Não executa a validação após importar")
     pacote_cmd.set_defaults(func=_importar_siconfi)
 
+    bases_cmd = subcomandos.add_parser("importar-bases", help="Importa as planilhas de layout fixo: DCA, SIOPS, SIOPE e TCE")
+    bases_cmd.add_argument("arquivos", nargs="*", type=Path,
+                           help="Planilhas (padrão: as quatro com o nome usual na pasta de bases)")
+    bases_cmd.add_argument("--sem-validar", action="store_true", help="Não executa a validação após importar")
+    bases_cmd.set_defaults(func=_importar_bases)
+
     planilha_cmd = subcomandos.add_parser("planilha-central", help="Gera a planilha completa da central (2019 a 2025) com abas explicativas")
     planilha_cmd.add_argument("--saida", type=Path, default=None, help="Arquivo .xlsx de saída (padrão: relatorios/central_inconsistencias_<data>.xlsx)")
     planilha_cmd.set_defaults(func=_planilha_central)
@@ -406,6 +412,42 @@ def _importar_siconfi(argumentos) -> int:
     print(f"Consultas: {resultado.get('status', 0)} · cobertura: {resultado.get('cobertura', 0)} · ocorrências: {len(resultado['ocorrencias'])}")
     if not argumentos.sem_validar:
         print(f"Validação: execução {executar(engine, 'linha de comando', progresso=print)}")
+    return 0
+
+
+def _importar_bases(argumentos) -> int:
+    from validacao.conferencia import bases_fixas
+    from validacao.conferencia.execucao import executar
+    from validacao.conferencia.migracao import atualizar_estrutura, preparar, precisa_atualizar
+
+    banco = argumentos.banco or BANCO_PADRAO
+    engine = criar_engine(banco)
+    preparar(engine)
+    if precisa_atualizar(engine):
+        atualizar_estrutura(engine)
+    caminhos = list(argumentos.arquivos)
+    if not caminhos:
+        caminhos = [PASTA_PLANILHAS / item["arquivo"] for item in bases_fixas.LAYOUTS.values()
+                    if (PASTA_PLANILHAS / item["arquivo"]).is_file()]
+        if not caminhos:
+            print(f"Nenhuma planilha encontrada em {PASTA_PLANILHAS}. Informe os arquivos.")
+            return 1
+    try:
+        ordenados = bases_fixas.ordenar([(c.name, c.read_bytes()) for c in caminhos])
+    except bases_fixas.LayoutDesconhecido as erro:
+        print(erro)
+        return 1
+    mudou = False
+    for _fonte, nome, conteudo in ordenados:
+        with Session(engine) as session:
+            resultado = bases_fixas.importar_arquivo(session, nome, conteudo, "linha de comando",
+                                                     Path(banco).parent / "importacoes" / "arquivos", progresso=print)
+        print(resultado["mensagem"], flush=True)
+        mudou = mudou or bool(resultado["novos"] or resultado["novas_versoes"])
+    if mudou and not argumentos.sem_validar:
+        print(f"Validação: execução {executar(engine, 'linha de comando', progresso=print)}")
+    elif not mudou:
+        print("Nenhum valor mudou; a validação atual continua valendo.")
     return 0
 
 

@@ -227,6 +227,29 @@
     }
   }
 
+  let quadroAtivo = null;
+  document.addEventListener("submit", async (evento) => {
+    const form = evento.target.closest("form[data-importar-bases]");
+    if (!form) return;
+    evento.preventDefault();
+    const botao = form.querySelector("button[type=submit]");
+    const mensagem = form.querySelector("[data-bases-mensagem]");
+    botao.disabled = true;
+    if (mensagem) mensagem.textContent = "Enviando…";
+    try {
+      const resposta = await fetch("/importar/bases", { method: "POST", body: new FormData(form) });
+      const dados = await resposta.json();
+      if (!dados.ok) { if (mensagem) mensagem.textContent = dados.erro; botao.disabled = false; return; }
+      if (mensagem) mensagem.textContent = "Reconhecidas: " + dados.reconhecidos.join(", ") + ".";
+      quadroAtivo = document.querySelector("[data-progresso-bases]");
+      if (quadroAtivo) { quadroAtivo.hidden = false; quadroAtivo.scrollIntoView({ block: "nearest" }); }
+      acompanhar();
+    } catch (erro) {
+      if (mensagem) mensagem.textContent = "Falha no envio: " + erro;
+      botao.disabled = false;
+    }
+  });
+
   async function iniciarValidacao(rota) {
     const alvo = document.getElementById("estado-validacao");
     const resposta = await fetch(rota || "/validar", { method: "POST" });
@@ -240,7 +263,7 @@
     const resposta = await fetch("/validar/estado");
     const estado = await resposta.json();
     if (alvo) alvo.textContent = estado.rodando ? `Validando: ${estado.mensagem}` : (estado.erro ? `Falha: ${estado.erro}` : estado.mensagem);
-    const quadro = document.querySelector("[data-progresso]");
+    const quadro = quadroAtivo || document.querySelector(estado.tipo === "importar_bases" ? "[data-progresso-bases]" : "[data-progresso]");
     if (quadro && (estado.rodando || estado.erro)) {
       quadro.hidden = false;
       quadro.classList.toggle("falhou", !!estado.erro && !estado.rodando);
@@ -248,7 +271,7 @@
       if (texto) texto.textContent = estado.rodando ? estado.mensagem : `Falhou: ${estado.erro}`;
     }
     if (estado.rodando) { setTimeout(acompanhar, 1200); return; }
-    if (!estado.erro && estado.execucao) setTimeout(() => window.location.reload(), 600);
+    if (!estado.erro && (estado.execucao || estado.tipo === "importar_bases")) setTimeout(() => window.location.reload(), 600);
   }
 
   const inicial = new URL(window.location).searchParams.get("caso");

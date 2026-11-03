@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-ESCRITA = {"validar", "importar_siconfi", "manutencao"}  # uma de cada vez
+ESCRITA = {"validar", "importar_siconfi", "importar_bases", "manutencao"}  # uma de cada vez
 TIPOS = ESCRITA | {"exportar", "copia_nuvem"}
 _processos: dict[str, subprocess.Popen] = {}
 SRC = Path(__file__).resolve().parents[2]
@@ -206,6 +206,8 @@ def executar_tarefa(banco: Path, tarefa_id: str) -> int:
             )
             dados["resumo_importacao"] = resumo_texto
             _validar(engine, banco, usuario, progresso, dados, prefixo=f"Pacote importado ({resumo_texto}). ")
+        elif tipo == "importar_bases":
+            _importar_bases(engine, banco, usuario, progresso, dados, parametros)
         elif tipo == "exportar":
             _exportar(engine, banco, tarefa_id, parametros, usuario, progresso, dados)
         elif tipo == "manutencao":
@@ -236,6 +238,37 @@ def _validar(engine, banco, usuario, progresso, dados, prefixo=""):
     dados["execucao"] = execucao_id
     compactar_se_preciso(engine, progresso=lambda m: progresso(prefixo + m))
     progresso(f"{prefixo}Execução {execucao_id} concluída.")
+
+
+def _importar_bases(engine, banco, usuario, progresso, dados, parametros):
+    from sqlalchemy.orm import Session
+
+    from validacao.conferencia import bases_fixas
+
+    arquivos = [(item["nome"], Path(item["caminho"]).read_bytes()) for item in parametros.get("arquivos", [])]
+    resultados = []
+    try:
+        for _fonte, nome, conteudo in bases_fixas.ordenar(arquivos):
+            with Session(engine) as session:
+                resultado = bases_fixas.importar_arquivo(session, nome, conteudo, usuario, banco.parent / "importacoes" / "arquivos",
+                                                         progresso=progresso)
+            resultados.append(resultado)
+            dados["resultados"] = resultados
+            progresso(resultado["mensagem"])
+    finally:
+        for item in parametros.get("arquivos", []):  # o arquivo enviado fica guardado no lote; o temporário sai
+            try:
+                Path(item["caminho"]).unlink()
+            except OSError:
+                pass
+    mudou = any(r["novos"] or r["novas_versoes"] for r in resultados)
+    resumo_texto = "; ".join(r["mensagem"] for r in resultados)
+    if mudou:
+        _validar(engine, banco, usuario, progresso, dados, prefixo="Bases importadas. ")
+        progresso(f"Bases importadas e validadas (execução {dados['execucao']}).")
+    else:
+        progresso("Nenhum valor mudou; a validação atual continua valendo.")
+    dados["resumo_importacao"] = resumo_texto
 
 
 def _exportar(engine, banco, tarefa_id, parametros, usuario, progresso, dados):

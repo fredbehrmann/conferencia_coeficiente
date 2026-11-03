@@ -114,8 +114,50 @@
   {% endif %}
 </section>
 
+<section class="bloco bases-fixas">
+  <div class="pacote-cabeca">
+    <div>
+      <h2 style="margin-bottom: 2px">DCA, SIOPS, SIOPE e Tribunais de Contas</h2>
+      <p class="sutil" style="margin: 0">Planilhas de layout fixo. Envie uma, algumas ou as quatro de uma vez; o tipo é reconhecido pelas abas, não pelo nome do arquivo.</p>
+    </div>
+  </div>
+  <div style="overflow-x: auto; margin-top: 10px">
+  <table class="tabela-simples">
+    <thead><tr><th>Base</th><th>Planilha esperada</th><th>Última importação</th><th class="num">Valores vigentes</th></tr></thead>
+    <tbody>
+    {% for b in bases %}
+      <tr>
+        <td><b>{{ b.nome }}</b></td>
+        <td><span class="mono">{{ b.arquivo }}</span><div class="sutil">{{ b.descricao }}</div></td>
+        <td>{% if b.lote %}<a href="/importar/lote/{{ b.lote.id }}">lote {{ b.lote.id }}</a> · {{ b.lote.data_importacao|datahora }}{% if b.lote.origem_tipo == 'MIGRACAO' %} <span class="sutil">(versão 1)</span>{% endif %}{% if b.lote.data_extracao %}<div class="sutil">extração {{ b.lote.data_extracao|data }}</div>{% endif %}{% else %}<span class="sutil">nunca importada</span>{% endif %}</td>
+        <td class="num">{{ b.vigentes|milhar }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <form class="envio-bases" data-importar-bases enctype="multipart/form-data">
+    <input type="file" name="arquivos" accept=".xlsx,.xlsm" multiple required aria-label="Planilhas de layout fixo">
+    <button class="primario" type="submit">Importar e validar</button>
+    <span class="sutil" data-bases-mensagem role="status"></span>
+  </form>
+  <div class="progresso-importacao" data-progresso-bases hidden role="status" aria-live="polite">
+    <div class="barra-indeterminada" aria-hidden="true"><span></span></div>
+    <div data-progresso-texto>Enviando…</div>
+    <div class="sutil">Cerca de 10 segundos por planilha, mais a validação se algum valor mudar. Esta página atualiza sozinha ao terminar.</div>
+  </div>
+  {% if ultima_bases and not ultima_bases.rodando %}
+  <div class="ultima-bases {{ 'erro' if ultima_bases.erro }}">
+    <b>Última importação</b> ({{ ultima_bases.criada_em }} · {{ ultima_bases.usuario }}){% if ultima_bases.erro %}: falhou — {{ ultima_bases.erro }}{% endif %}
+    {% if ultima_bases.resultados %}<ul>{% for r in ultima_bases.resultados %}<li>{{ r.mensagem }}{% if r.ocorrencias %} <a href="/importar/lote/{{ r.lote }}">ver ocorrências</a>{% endif %}</li>{% endfor %}</ul>{% endif %}
+    {% if not ultima_bases.erro %}<div class="sutil">{{ ultima_bases.mensagem }}</div>{% endif %}
+  </div>
+  {% endif %}
+  <p class="sutil" style="margin-bottom: 0">Mesmas regras da carga original: valor igual ao vigente não grava nada; valor diferente vira nova versão e a anterior é preservada; casos já decididos voltam para reanálise. Arquivo idêntico a um já importado é reconhecido e ignorado. Células vazias não geram registro e compensações financeiras (fora do art. 115) são ignoradas.</p>
+</section>
+
 <details class="bloco outras-planilhas" {{ 'open' if erro }}>
-  <summary><b>Importar outra planilha (CSV ou XLSX avulso)</b> <span class="sutil">— para fontes fora do pacote, como uma nova extração do SIOPE ou do TCE</span></summary>
+  <summary><b>Importar outra planilha (CSV ou XLSX avulso)</b> <span class="sutil">— para arquivos com outro layout, mapeando as colunas na tela</span></summary>
   <div class="colunas2" style="margin-top: 10px">
     <section>
       <h3>1. Escolha o arquivo</h3>

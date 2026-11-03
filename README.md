@@ -38,6 +38,7 @@ Outros comandos:
 | `python -m validacao migrar` | Só a migração, com backup. É idempotente. |
 | `python -m validacao validar` | Executa as regras sobre os registros atuais (todos os componentes). |
 | `python -m validacao importar-siconfi` | Importa o pacote de RREO e MSC da pasta Bases Conjuntas e valida. Também disponível na aba Importar. |
+| `python -m validacao importar-bases [planilhas...]` | Importa DCA, SIOPS, SIOPE e TCE (layout fixo) e valida se algo mudou. Sem argumentos, usa as planilhas da pasta Bases Conjuntas. Também na aba Importar. |
 | `python -m validacao demo --porta 8010` | Cria `data/demonstracao.sqlite` com **dados fictícios** dos 8 cenários de aceitação e abre a tela. |
 | `python -m validacao servir-v1` | Telas da versão 1 (legado), na porta 8001. |
 | `python -m pytest tests/test_conferencia.py` | Testes das regras e dos cenários de aceitação (instale antes `requirements-dev.txt`). |
@@ -60,6 +61,24 @@ conferência automática dos arquivos (RREO = base, soma da MSC = base, valores 
 
 As linhas de detalhe ficam em `data/detalhes_siconfi.sqlite`, separado do banco principal. RREO e MSC
 pertencem ao mesmo declarante (SICONFI): divergem da DCA pela regra DSI, mas não contam como validação independente.
+
+## Bases de layout fixo (DCA, SIOPS, SIOPE e Tribunais de Contas)
+
+Na aba **Importar**, envie uma ou mais destas planilhas (de uma vez); o tipo é reconhecido pelas abas, não pelo nome:
+
+| Base | Planilha usual | Abas lidas | Campos |
+|---|---|---|---|
+| DCA — SICONFI | `SICONFI_DCA_Receitas_2019_2025.xlsx` | `SICONFI` e `SICONFI_BRUTO` | ISS, cota-parte e ICMS (totais), cota repassada; bruto, FUNDEB, deduções e FECOP |
+| SIOPS | `SIOPS - ICMS e ISS.xlsx` | `Municipios` e `Estados` | ISS, cota-parte, ICMS e cota repassada |
+| SIOPE | `Dados SIOPE - ICMS e ISS.xlsx` | `Municipios` e `Estados` | ISS e ICMS com abertura (principal, multas, dívida ativa, FECOP) e cota-parte |
+| Tribunais de Contas | `TCE Arrecadacao Municipios - 2019_2025.xlsx` | `Base detalhada` (+ `ISS` e `Leia-me`) | Abertura do ISS e da cota-parte, com a natureza do valor informada pelo tribunal |
+
+A leitura repete a carga original da versão 1 (mesmas colunas, campos, parcelas e conceitos). Reimportar as
+planilhas atuais sobre o banco migrado dá **0 novos e 0 versões** nos 637.282 valores (conferido). Numa planilha
+atualizada, só o que mudou vira nova versão; casos já decididos voltam para reanálise. Arquivo idêntico a um já
+importado é ignorado. A DCA é processada primeiro porque completa o cadastro de entes; códigos sem ente vão para
+o relatório de ocorrências do lote, sem interromper a importação. Células vazias não geram registro e compensações
+financeiras (fora do art. 115) são ignoradas. A data de extração vem do `Leia-me` (TCE) ou das propriedades da planilha.
 
 ## Jornada principal
 

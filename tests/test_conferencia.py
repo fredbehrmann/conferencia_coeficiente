@@ -6,6 +6,7 @@ modo "ambas", gravidade alta acima de 20%; variação atípica: 3,0×.
 """
 
 import io
+from datetime import datetime
 import json
 import re
 import sqlite3
@@ -835,3 +836,136 @@ def test_senhas():
     assert contas.problema_da_senha("Xq7!mR2#vL9pK4wz") is None
     gerada = contas.gerar_senha()
     assert len(gerada) == 20 and contas.problema_da_senha(gerada) is None
+
+
+# ------------------------------------------------------- bases de layout fixo
+
+def _xlsx(abas: dict) -> bytes:
+    from openpyxl import Workbook
+
+    livro = Workbook()
+    livro.remove(livro.active)
+    for nome, linhas in abas.items():
+        aba = livro.create_sheet(nome)
+        for linha in linhas:
+            aba.append(list(linha))
+    saida = io.BytesIO()
+    livro.save(saida)
+    return saida.getvalue()
+
+
+def _planilhas_fixas(iss_a=1_000_000.0):
+    dca = _xlsx({
+        "SICONFI": [("ANO", "COD_IBGE", "ENTE", "ESFERA", "ICMS", "COTA_EST", "ISS", "COTA_MUN", "COMPEN_FIN", "COTA_COMPEN_FIN"),
+                    (2023, 29, "Governo do Estado da Bahia", "Estado", 50_000_000.0, 12_500_000.0, None, None, 0, 0),
+                    (2023, 9900101, "Fictício A", "Município", None, None, iss_a, 2_000_000.0, 10.0, 0)],
+        "SICONFI_BRUTO": [("ANO", "COD_IBGE", "ENTE", "ESFERA", "ISS_BRUTO", "ISS_DEDUCOES_OUTRAS"),
+                          (2023, 9900101, "Fictício A", "Município", iss_a + 5_000.0, 5_000.0)],
+    })
+    siops = _xlsx({
+        "Municipios": [("UF", "COD_IBGE", "ANO", "BASE", "ENTE", "ISS", "Cota-Parte", "Comp. Fin"),
+                       ("XX", 9900101, 2023, "SIOPS", "Fictício A", iss_a, 2_000_000.0, 0)],
+        "Estados": [("UF", "COD_IBGE", "ANO", "BASE", "ENTE", "ICMS", "Cota-Parte", "Comp. Fin"),
+                    ("BA", 29, 2023, "SIOPS", "BA", 50_000_000.0, 12_500_000.0, 0)],
+    })
+    siope = _xlsx({
+        "Municipios": [("UF", "COD_IBGE", "ANO", "BASE", "Cota-Parte", "ISS", "ISS Principal", "ISS Multas e Juros Mora",
+                        "ISS DA - Principal", "ISS DA - Multas e Juros", "ISS FECOP", "Compensacoes"),
+                       ("XX", "9900101", 2023, "SIOPE", 2_000_000.0, iss_a, iss_a - 1_000.0, 1_000.0, None, None, None, None),
+                       ("XX", "999999", 2023, "SIOPE", 1.0, 1.0, None, None, None, None, None, None)],
+        "Estados": [("UF", "COD_IBGE", "ANO", "BASE", "ICMS", "ICMS Principal", "ICMS Multas e Juros Mora", "ICMS DA - Principal",
+                     "ICMS DA - Multas e Juros", "ICMS FECOP", "Compensacoes"),
+                    ("BA", "29", 2023, "SIOPE", 50_000_000.0, 49_000_000.0, 1_000_000.0, None, None, None, None)],
+    })
+    cabecalho_tce = ("UF", "Tribunal", "Cód. IBGE", "Município", "Exercício", "Principal", "Multas e juros", "Dívida ativa",
+                     "Multas e juros da dívida ativa", "Outros itens / total sem abertura", "Total publicado", "Dedução FUNDEB",
+                     "Outras deduções", "ISS — valor de referência", "Natureza do valor ISS", "Bruto", "Dedução FUNDEB",
+                     "Outras deduções", "Líquido", "Valor único (sem classificação)", "Cota-parte — valor de referência",
+                     "Natureza do valor cota-parte", "Observações")
+    tce = _xlsx({
+        "Leia-me": [("Arrecadação municipal",), ("Exercícios",), ("SEFAZ · Dados extraídos em 28/10/2026 pelo script",)],
+        "ISS": [("t",), ("s",), (None,), ("UF", "Tribunal", "Cód. IBGE", "Município", "Situação"),
+                ("XX", "TCE-XX", 9900101, "Fictício A", "Completo")],
+        "Base detalhada": [("t",), ("s",), (None,), ("Identificação",), cabecalho_tce,
+                           ("XX", "TCE-XX", 9900101, "Fictício A", 2023, iss_a, None, None, None, None, iss_a, None, None,
+                            iss_a, "Bruto publicado", 2_500_000.0, -500_000.0, None, 2_000_000.0, None, 2_500_000.0,
+                            "Bruto publicado", None)],
+    })
+    return {"dca.xlsx": dca, "siops.xlsx": siops, "siope.xlsx": siope, "tce.xlsx": tce}
+
+
+def test_bases_de_layout_fixo(tmp_path):
+    from validacao.conferencia import bases_fixas
+
+    destino = tmp_path / "bases.sqlite"
+    construir(destino)
+    engine = criar_engine(destino)
+    planilhas = _planilhas_fixas()
+    ordenados = bases_fixas.ordenar(list(planilhas.items())[::-1])
+    assert [fonte for fonte, _n, _c in ordenados] == ["SICONFI", "SIOPS", "SIOPE", "TCE"]  # DCA primeiro
+    with pytest.raises(bases_fixas.LayoutDesconhecido):
+        bases_fixas.identificar("outra.xlsx", _xlsx({"Planilha1": [("a", "b")]}))
+    resultados = {}
+    for fonte, nome, conteudo in ordenados:
+        with Session(engine) as session:
+            resultados[fonte] = bases_fixas.importar_arquivo(session, nome, conteudo, "teste")
+    assert all(r["situacao"] == "IMPORTADO" and r["novos"] > 0 for r in resultados.values())
+    assert resultados["SIOPE"]["ocorrencias"] == 1  # código 999999 sem ente: vai para o relatório, não aborta
+    with Session(engine) as session:
+        def vigente(declaracao, campo, ente=9900101):
+            return session.scalar(select(cf.Registro).where(
+                cf.Registro.declaracao_id == declaracao, cf.Registro.campo == campo, cf.Registro.id_ente == ente,
+                cf.Registro.exercicio == 2023, cf.Registro.vigente.is_(True)))
+
+        iss = vigente("SICONFI_DCA", "ISS_TOTAL")
+        assert (iss.valor_centavos, iss.componente_id, iss.parcela, iss.conceito) == (100_000_000, "ISS_MUN", "TOTAL", "LIQUIDO")
+        assert json.loads(iss.procedencia)["aba"] == "SICONFI"
+        assert vigente("SIOPS", "ISS_TOTAL").valor_centavos == 100_000_000
+        # (os códigos fictícios repetem os 6 primeiros dígitos; a conversão de 6 para 7 dígitos foi conferida
+        #  com as planilhas reais: reimportá-las sobre a carga da versão 1 dá 0 novos e 0 versões)
+        assert vigente("SIOPE", "ISS_PRINCIPAL").parcela == "PRINCIPAL"
+        assert vigente("SIOPS", "ICMS_TOTAL", 29).componente_id == "ICMS_UF"  # estado criado pela DCA
+        tce = vigente("TCE", "COTA_RECEBIDA_TOTAL")
+        assert tce.conceito == "BRUTO" and json.loads(tce.procedencia)["natureza_informada"] == "Bruto publicado"
+        assert vigente("SICONFI_DCA", "COMPENSACAO") is None  # fora do art. 115
+        lote_tce = session.get(cf.Lote, resultados["TCE"]["lote"])
+        assert lote_tce.data_extracao == datetime(2026, 10, 28)
+    # mesmo arquivo: reconhecido; valor alterado: só a diferença vira nova versão
+    with Session(engine) as session:
+        assert bases_fixas.importar_arquivo(session, "dca.xlsx", planilhas["dca.xlsx"], "teste")["situacao"] == "JA_IMPORTADO"
+    alterada = _planilhas_fixas(iss_a=1_100_000.0)["dca.xlsx"]
+    with Session(engine) as session:
+        r = bases_fixas.importar_arquivo(session, "dca-retificada.xlsx", alterada, "teste")
+    assert (r["novos"], r["novas_versoes"]) == (0, 2) and r["repetidos"] > 0  # ISS_TOTAL e ISS_BRUTO mudaram
+    with Session(engine) as session:
+        novo = session.scalar(select(cf.Registro).where(
+            cf.Registro.declaracao_id == "SICONFI_DCA", cf.Registro.campo == "ISS_TOTAL", cf.Registro.id_ente == 9900101,
+            cf.Registro.exercicio == 2023, cf.Registro.vigente.is_(True)))
+        assert novo.valor_centavos == 110_000_000  # a demonstração já tinha uma versão anterior
+        anterior = session.get(cf.Registro, novo.substitui_id)
+        assert anterior.valor_centavos == 100_000_000 and not anterior.vigente
+
+
+def test_bases_de_layout_fixo_pela_tela(tmp_path):
+    destino = tmp_path / "tela.sqlite"
+    construir(destino)
+    planilhas = _planilhas_fixas()
+    with TestClient(criar_app(destino)) as cliente:
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
+        pagina = cliente.get("/importar").text
+        assert "DCA, SIOPS, SIOPE e Tribunais de Contas" in pagina
+        recusa = cliente.post("/importar/bases", files=[("arquivos", ("x.xlsx", _xlsx({"A": [("a",)]})))])
+        assert recusa.status_code == 400 and "layout não reconhecido" in recusa.json()["erro"]
+        resposta = cliente.post("/importar/bases", files=[("arquivos", (nome, conteudo)) for nome, conteudo in planilhas.items()])
+        assert resposta.json()["ok"] and resposta.json()["reconhecidos"][0] == "DCA — SICONFI"
+        import time
+
+        for _ in range(240):
+            estado = cliente.get("/validar/estado").json()
+            if not estado["rodando"]:
+                break
+            time.sleep(0.5)
+        assert not estado["erro"], estado
+        assert estado["tipo"] == "importar_bases" and estado["execucao"]
+        assert "Última importação" in cliente.get("/importar").text
+    assert not list((tmp_path / "importacoes" / "pendentes").glob("*.xlsx"))  # temporários removidos
