@@ -6,7 +6,7 @@
   <div class="pacote-cabeca">
     <div>
       <h2 style="margin-bottom: 2px">RREO e MSC do SICONFI</h2>
-      <p class="sutil" style="margin: 0">Pasta <span class="mono">{{ pasta_pacote }}</span></p>
+      <p class="sutil" style="margin: 0">{% if pacote_enviado %}Último pacote enviado pela tela{% else %}Pasta <span class="mono">{{ pasta_pacote }}</span>{% endif %}</p>
     </div>
     <div class="pacote-acao">
       {% if sp %}
@@ -25,6 +25,13 @@
       {% endif %}
     </div>
   </div>
+
+  <form class="envio-bases" data-envio data-rota="/importar/siconfi/arquivos" data-alvo="[data-progresso]" enctype="multipart/form-data">
+    <input type="file" name="arquivos" accept=".csv,.txt,.zip" multiple required aria-label="Arquivos do pacote do SICONFI">
+    <button type="submit">Enviar arquivos, importar e validar</button>
+    <span class="sutil" data-bases-mensagem role="status"></span>
+  </form>
+  <p class="sutil" style="margin-top: 0">Envie os cinco CSV do pacote (ou um ZIP com eles); cada um é reconhecido pelo cabeçalho. A base de validação é obrigatória; o novo envio substitui o anterior.</p>
 
   <div class="progresso-importacao" data-progresso hidden role="status" aria-live="polite">
     <div class="barra-indeterminada" aria-hidden="true"><span></span></div>
@@ -136,7 +143,7 @@
     </tbody>
   </table>
   </div>
-  <form class="envio-bases" data-importar-bases enctype="multipart/form-data">
+  <form class="envio-bases" data-envio data-rota="/importar/bases" data-alvo="[data-progresso-bases]" enctype="multipart/form-data">
     <input type="file" name="arquivos" accept=".xlsx,.xlsm" multiple required aria-label="Planilhas de layout fixo">
     <button class="primario" type="submit">Importar e validar</button>
     <span class="sutil" data-bases-mensagem role="status"></span>

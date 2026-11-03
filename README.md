@@ -45,7 +45,12 @@ Outros comandos:
 
 ## Pacote de recuperação do SICONFI (RREO e MSC)
 
-Arquivos lidos da pasta Bases Conjuntas (ou de uma subpasta imediata):
+Os arquivos podem vir de dois lugares: da pasta Bases Conjuntas (ou de uma subpasta imediata) ou **enviados pela
+aba Importar** — os cinco CSV soltos ou um ZIP com eles (o ZIP do pacote completo tem ~10 MB, contra ~77 MB dos CSV).
+No envio, cada arquivo é reconhecido pelo cabeçalho, não pelo nome; a base de validação é obrigatória e um arquivo
+fora do layout recusa o envio inteiro. O pacote enviado fica em `<pasta do banco>/pacote_siconfi/` e substitui o
+envio anterior por inteiro. Vale o mais recente entre a pasta e o envio. A data de extração do lote vem do
+`atualizado_em` mais recente do `status.csv`.
 
 | Arquivo | Uso |
 |---|---|

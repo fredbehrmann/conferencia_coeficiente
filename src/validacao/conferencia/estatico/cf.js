@@ -229,7 +229,7 @@
 
   let quadroAtivo = null;
   document.addEventListener("submit", async (evento) => {
-    const form = evento.target.closest("form[data-importar-bases]");
+    const form = evento.target.closest("form[data-envio]");
     if (!form) return;
     evento.preventDefault();
     const botao = form.querySelector("button[type=submit]");
@@ -237,11 +237,11 @@
     botao.disabled = true;
     if (mensagem) mensagem.textContent = "Enviando…";
     try {
-      const resposta = await fetch("/importar/bases", { method: "POST", body: new FormData(form) });
+      const resposta = await fetch(form.dataset.rota, { method: "POST", body: new FormData(form) });
       const dados = await resposta.json();
       if (!dados.ok) { if (mensagem) mensagem.textContent = dados.erro; botao.disabled = false; return; }
       if (mensagem) mensagem.textContent = "Reconhecidas: " + dados.reconhecidos.join(", ") + ".";
-      quadroAtivo = document.querySelector("[data-progresso-bases]");
+      quadroAtivo = document.querySelector(form.dataset.alvo);
       if (quadroAtivo) { quadroAtivo.hidden = false; quadroAtivo.scrollIntoView({ block: "nearest" }); }
       acompanhar();
     } catch (erro) {
@@ -271,7 +271,7 @@
       if (texto) texto.textContent = estado.rodando ? estado.mensagem : `Falhou: ${estado.erro}`;
     }
     if (estado.rodando) { setTimeout(acompanhar, 1200); return; }
-    if (!estado.erro && (estado.execucao || estado.tipo === "importar_bases")) setTimeout(() => window.location.reload(), 600);
+    if (!estado.erro && (estado.execucao || estado.tipo === "importar_bases" || quadroAtivo)) setTimeout(() => window.location.reload(), 600);
   }
 
   const inicial = new URL(window.location).searchParams.get("caso");

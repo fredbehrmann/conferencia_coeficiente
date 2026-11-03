@@ -71,11 +71,124 @@ class PacoteInvalido(ValueError):
     pass
 
 
+# Colunas que identificam cada arquivo do pacote, para reconhecer arquivos enviados com outro nome.
+ASSINATURAS = {
+    "base": {"cod_ibge", "componente", "valor_rreo", "valor_msc", "situacao"},
+    "rreo": {"cod_ibge", "componente", "valor", "cod_conta", "anexo", "demonstrativo"},
+    "msc": {"cod_ibge", "componente", "natureza_receita", "conta_contabil", "valor_sinalizado"},
+    "cobertura": {"cod_ibge", "componentes_esperados", "consultas_rreo_ok", "consultas_msc_ok"},
+    "status": {"fonte", "cod_ibge", "ok", "linhas_retidas", "linhas_lidas"},
+}
+MARCA_ENVIO = ".recebido_em"  # quando o pacote foi enviado pela tela (a data dos arquivos é a da extração)
+
+
+def recebido_em(pasta: Path) -> float | None:
+    marca = Path(pasta) / MARCA_ENVIO
+    try:
+        return datetime.fromisoformat(marca.read_text(encoding="utf-8").strip()).timestamp()
+    except (OSError, ValueError):
+        return None
+
+
+NOMES_ARQUIVO = {"base": "base de validação", "rreo": "RREO", "msc": "MSC", "cobertura": "cobertura", "status": "status das consultas"}
+
+
+def identificar_csv(inicio: bytes) -> str | None:
+    """Reconhece o arquivo do pacote pela linha de cabeçalho (primeiros bytes do CSV)."""
+    for codificacao in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            texto = inicio.decode(codificacao)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return None
+    primeira = texto.lstrip("\ufeff").splitlines()[0] if texto.strip() else ""
+    separador = ";" if primeira.count(";") >= primeira.count(",") else ","
+    colunas = {c.strip().strip('"').lower() for c in primeira.split(separador)}
+    for chave, exigidas in ASSINATURAS.items():
+        if exigidas <= colunas:
+            return chave
+    return None
+
+
+def receber(enviados: list[tuple[str, Path]], destino: Path) -> dict[str, str]:
+    """Recebe os arquivos do pacote enviados pela tela (CSV soltos ou um ZIP) e grava em `destino`.
+
+    Cada arquivo é reconhecido pelo cabeçalho e salvo com o nome padrão. O conjunto enviado
+    substitui o anterior por inteiro, para não misturar detalhes de extrações diferentes.
+    Devolve {chave: nome original}. A base de validação é obrigatória.
+    """
+    import os
+    import shutil
+    import tempfile
+    import zipfile
+
+    destino = Path(destino)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    temporaria = Path(tempfile.mkdtemp(prefix="pacote-", dir=destino.parent))
+    reconhecidos: dict[str, str] = {}
+    recusados: list[str] = []
+
+    def guardar(nome: str, abrir) -> None:
+        with abrir() as origem:
+            inicio = origem.read(65536)
+            chave = identificar_csv(inicio)
+            if chave is None:
+                recusados.append(nome)
+                return
+            if chave in reconhecidos:
+                raise PacoteInvalido(f"Dois arquivos de {NOMES_ARQUIVO[chave]}: {reconhecidos[chave]} e {nome}.")
+            with open(temporaria / ARQUIVOS[chave], "wb") as saida:
+                saida.write(inicio)
+                shutil.copyfileobj(origem, saida, 1024 * 1024)
+            reconhecidos[chave] = nome
+
+    try:
+        for nome, caminho in enviados:
+            if zipfile.is_zipfile(caminho):
+                with zipfile.ZipFile(caminho) as pacote:
+                    for membro in pacote.infolist():
+                        if membro.is_dir() or not membro.filename.lower().endswith((".csv", ".txt")) \
+                                or "__MACOSX" in membro.filename:
+                            continue
+                        guardar(Path(membro.filename).name, lambda m=membro, z=pacote: z.open(m))
+            else:
+                guardar(nome, lambda c=caminho: open(c, "rb"))
+        if "base" not in reconhecidos:
+            detalhe = f" Não reconhecidos: {', '.join(recusados)}." if recusados else ""
+            raise PacoteInvalido(f"Falta o arquivo da base de validação ({ARQUIVOS['base']}), obrigatório.{detalhe}")
+        if recusados:
+            raise PacoteInvalido(f"Arquivos fora do layout do pacote: {', '.join(recusados)}. "
+                                 "Esperados: " + ", ".join(ARQUIVOS.values()) + ".")
+        extracao = _data_extracao_status(temporaria / ARQUIVOS["status"]) if "status" in reconhecidos else None
+        if extracao is not None:  # a data do arquivo vira a data de extração do lote
+            for arquivo in temporaria.iterdir():
+                os.utime(arquivo, (extracao.timestamp(), extracao.timestamp()))
+        (temporaria / MARCA_ENVIO).write_text(datetime.now().isoformat(), encoding="utf-8")
+        if destino.exists():
+            shutil.rmtree(destino)
+        temporaria.replace(destino)
+    finally:
+        if temporaria.exists():
+            shutil.rmtree(temporaria, ignore_errors=True)
+    return reconhecidos
+
+
+def _data_extracao_status(caminho: Path) -> datetime | None:
+    try:
+        quadro = _ler_csv(caminho)[0]
+        datas = pd.to_datetime(quadro.get("atualizado_em"), errors="coerce").dropna()
+        return datas.max().to_pydatetime().replace(microsecond=0, tzinfo=None) if len(datas) else None
+    except Exception:
+        return None
+
+
 def localizar(pasta: Path) -> dict[str, Path]:
     """Procura os arquivos na pasta e, se não estiverem lá, nas subpastas imediatas."""
     pasta = Path(pasta)
     encontrados = {}
-    candidatos = [pasta] + sorted([p for p in pasta.iterdir() if p.is_dir() and p.name not in ("validacao",)]) if pasta.is_dir() else []
+    candidatos = [pasta] + sorted([p for p in pasta.iterdir() if p.is_dir() and p.name not in ("validacao", "pacote_siconfi", "importacoes", "tarefas", "backup")]) if pasta.is_dir() else []
     for chave, nome in ARQUIVOS.items():
         for base in candidatos:
             caminho = base / nome

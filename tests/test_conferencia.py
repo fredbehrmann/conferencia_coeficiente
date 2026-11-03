@@ -969,3 +969,42 @@ def test_bases_de_layout_fixo_pela_tela(tmp_path):
         assert estado["tipo"] == "importar_bases" and estado["execucao"]
         assert "Última importação" in cliente.get("/importar").text
     assert not list((tmp_path / "importacoes" / "pendentes").glob("*.xlsx"))  # temporários removidos
+
+
+def test_pacote_siconfi_enviado_pela_tela(tmp_path):
+    import time
+
+    from validacao.conferencia.demo import gerar_pacote_ficticio
+    from validacao.conferencia.pacote_siconfi import ARQUIVOS, identificar_csv
+
+    destino = tmp_path / "envio.sqlite"
+    construir(destino)
+    pasta = gerar_pacote_ficticio(tmp_path / "pacote")
+    for chave, nome in ARQUIVOS.items():
+        assert identificar_csv((pasta / nome).read_bytes()[:4096]) == chave
+    # ZIP com subpasta e nomes trocados: reconhecido pelo cabeçalho
+    pacote_zip = tmp_path / "pacote.zip"
+    with zipfile.ZipFile(pacote_zip, "w") as z:
+        for chave, nome in ARQUIVOS.items():
+            z.write(pasta / nome, f"extracao/{chave}-copia.csv")
+    with TestClient(criar_app(destino)) as cliente:
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
+        so_rreo = cliente.post("/importar/siconfi/arquivos",
+                               files=[("arquivos", ("r.csv", (pasta / ARQUIVOS["rreo"]).read_bytes()))])
+        assert so_rreo.status_code == 400 and "obrigatório" in so_rreo.json()["erro"]
+        estranho = cliente.post("/importar/siconfi/arquivos", files=[
+            ("arquivos", ("b.csv", (pasta / ARQUIVOS["base"]).read_bytes())), ("arquivos", ("x.csv", b"a;b\n1;2\n"))])
+        assert estranho.status_code == 400 and "x.csv" in estranho.json()["erro"]
+        resposta = cliente.post("/importar/siconfi/arquivos", files=[("arquivos", ("pacote.zip", pacote_zip.read_bytes()))])
+        assert resposta.json()["ok"] and len(resposta.json()["reconhecidos"]) == 5
+        for _ in range(240):
+            estado = cliente.get("/validar/estado").json()
+            if not estado["rodando"]:
+                break
+            time.sleep(0.5)
+        assert not estado["erro"] and estado["tipo"] == "importar_siconfi" and estado["execucao"], estado
+        assert sorted(p.name for p in (tmp_path / "pacote_siconfi").glob("*.csv")) == sorted(ARQUIVOS.values())
+        pagina = cliente.get("/importar").text
+        assert "Último pacote enviado pela tela" in pagina and "5 de 5 encontrados" in pagina
+    with Session(criar_engine(destino)) as session:
+        assert session.scalar(select(func.count()).select_from(cf.Registro).where(cf.Registro.declaracao_id == "SICONFI_RREO")) > 0

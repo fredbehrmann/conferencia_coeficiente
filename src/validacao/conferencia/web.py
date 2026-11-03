@@ -498,6 +498,8 @@ def criar_app(banco: Path | None = None) -> FastAPI:
             return pagina(request, "importar.html", session, usuario, aba="importar", lotes=lotes,
                           bases=_situacao_bases(session), ultima_bases=_ultima_importacao_bases(),
                           pacote=arquivos_pacote, pasta_pacote=str(pasta_pacote()),
+                          pacote_enviado=any(a.get("presente") and Path(a["caminho"]).parent == pasta_pacote_enviado
+                                             for a in arquivos_pacote[:1]),
                           pacote_info=configuracao(session, "pacote_siconfi"),
                           sp=situacao_pacote(session, arquivos_pacote), **_catalogos(session))
 
@@ -710,6 +712,47 @@ def criar_app(banco: Path | None = None) -> FastAPI:
         return JSONResponse({"ok": True, "tarefa": tarefa_id,
                              "reconhecidos": [bases_fixas.LAYOUTS[f]["nome"] for f, _n, _c in ordenados]})
 
+    @app.post("/importar/siconfi/arquivos")
+    async def importar_siconfi_arquivos(request: Request):
+        """Recebe o pacote do SICONFI pela tela (CSV soltos ou um ZIP) e importa em segundo plano."""
+        import shutil
+        import tempfile
+
+        from validacao.conferencia.pacote_siconfi import PacoteInvalido, receber
+
+        formulario = await request.form()
+        enviados = [f for f in formulario.getlist("arquivos") if getattr(f, "filename", "")]
+        with sessao() as session:
+            usuario = exigir(request, session)
+            nome_usuario = usuario.nome
+        if not enviados:
+            return JSONResponse({"ok": False, "erro": "Escolha os arquivos do pacote."}, status_code=400)
+        if tarefas.ativa_escrita(destino) is not None:
+            return JSONResponse({"ok": False, "erro": "Já há uma importação ou validação em andamento."}, status_code=409)
+        pasta_pacote_enviado.parent.mkdir(parents=True, exist_ok=True)
+        recebidos = Path(tempfile.mkdtemp(prefix="envio-", dir=pasta_pacote_enviado.parent))
+        try:
+            caminhos = []
+            for posicao, arquivo in enumerate(enviados):
+                caminho = recebidos / f"{posicao}.bin"
+                with open(caminho, "wb") as saida:
+                    shutil.copyfileobj(arquivo.file, saida, 1024 * 1024)
+                caminhos.append((Path(arquivo.filename).name, caminho))
+            try:
+                reconhecidos = receber(caminhos, pasta_pacote_enviado)
+            except PacoteInvalido as erro:
+                return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+        finally:
+            shutil.rmtree(recebidos, ignore_errors=True)
+        try:
+            tarefa_id = tarefas.iniciar(destino, "importar_siconfi", {"pasta": str(pasta_pacote_enviado)}, nome_usuario)
+        except tarefas.Ocupado as erro:
+            return JSONResponse({"ok": False, "erro": str(erro)}, status_code=409)
+        from validacao.conferencia.pacote_siconfi import NOMES_ARQUIVO
+
+        return JSONResponse({"ok": True, "tarefa": tarefa_id,
+                             "reconhecidos": [NOMES_ARQUIVO[c] for c in ("base", "rreo", "msc", "cobertura", "status") if c in reconhecidos]})
+
     @app.post("/importar/siconfi")
     def importar_siconfi(request: Request):
         with sessao() as session:
@@ -759,10 +802,19 @@ def criar_app(banco: Path | None = None) -> FastAPI:
             raise HTTPException(404)
         return FileResponse(caminho, filename=dados.get("nome_arquivo") or caminho.name)
 
-    def pasta_pacote() -> Path:
-        from validacao.db import PASTA_PLANILHAS
+    pasta_pacote_enviado = destino.parent / "pacote_siconfi"
 
-        return PASTA_PLANILHAS if destino.resolve().parent == BANCO_PADRAO.resolve().parent else destino.parent
+    def pasta_pacote() -> Path:
+        """Pasta do pacote: a de bases ou a do último envio pela tela, a que tiver a base mais recente."""
+        from validacao.db import PASTA_PLANILHAS
+        from validacao.conferencia.pacote_siconfi import localizar, recebido_em
+
+        local = PASTA_PLANILHAS if destino.resolve().parent == BANCO_PADRAO.resolve().parent else destino.parent
+        enviado = recebido_em(pasta_pacote_enviado) if "base" in localizar(pasta_pacote_enviado) else None
+        base_local = localizar(local).get("base") if local.is_dir() else None
+        if enviado is not None and (base_local is None or enviado >= base_local.stat().st_mtime):
+            return pasta_pacote_enviado  # o envio pela tela é mais recente que os arquivos da pasta
+        return local
 
     cache_entes: dict = {}
 
