@@ -228,24 +228,56 @@
   }
 
   let quadroAtivo = null;
+  const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+  async function enviarArquivo(arquivo, aviso) {
+    // Um arquivo por pedido, com novas tentativas: um envio único e grande pode ser cortado pelo proxy.
+    let ultimoErro = null;
+    for (let tentativa = 1; tentativa <= 4; tentativa++) {
+      const dados = new FormData();
+      dados.append("arquivo", arquivo, arquivo.name);
+      try {
+        const resposta = await fetch("/importar/envio", { method: "POST", body: dados });
+        const corpo = await resposta.json().catch(() => ({ ok: false, erro: `resposta ${resposta.status} do servidor` }));
+        if (corpo.ok) return corpo.token;
+        if (resposta.status < 500) throw Object.assign(new Error(corpo.erro), { definitivo: true });
+        ultimoErro = new Error(corpo.erro);
+      } catch (erro) {
+        if (erro.definitivo) throw erro;
+        ultimoErro = erro;
+      }
+      if (tentativa < 4) { aviso(`conexão interrompida, nova tentativa (${tentativa + 1} de 4)…`); await esperar(2000 * tentativa); }
+    }
+    throw new Error(`não foi possível enviar ${arquivo.name} (${ultimoErro && ultimoErro.message})`);
+  }
+
   document.addEventListener("submit", async (evento) => {
     const form = evento.target.closest("form[data-envio]");
     if (!form) return;
     evento.preventDefault();
     const botao = form.querySelector("button[type=submit]");
     const mensagem = form.querySelector("[data-bases-mensagem]");
+    const escrever = (texto) => { if (mensagem) mensagem.textContent = texto; };
+    const arquivos = Array.from(form.querySelector("input[type=file]").files);
+    if (!arquivos.length) return;
     botao.disabled = true;
-    if (mensagem) mensagem.textContent = "Enviando…";
     try {
-      const resposta = await fetch(form.dataset.rota, { method: "POST", body: new FormData(form) });
-      const dados = await resposta.json();
-      if (!dados.ok) { if (mensagem) mensagem.textContent = dados.erro; botao.disabled = false; return; }
-      if (mensagem) mensagem.textContent = "Reconhecidas: " + dados.reconhecidos.join(", ") + ".";
+      const dados = new FormData();
+      for (const [posicao, arquivo] of arquivos.entries()) {
+        const prefixo = `Enviando ${posicao + 1} de ${arquivos.length}: ${arquivo.name} (${(arquivo.size / 1048576).toFixed(1).replace(".", ",")} MB)`;
+        escrever(prefixo + "…");
+        dados.append("tokens", await enviarArquivo(arquivo, (texto) => escrever(`${prefixo} — ${texto}`)));
+      }
+      escrever("Arquivos recebidos. Conferindo o layout…");
+      const resposta = await fetch(form.dataset.rota, { method: "POST", body: dados });
+      const corpo = await resposta.json().catch(() => ({ ok: false, erro: `resposta ${resposta.status} do servidor` }));
+      if (!corpo.ok) { escrever(corpo.erro); botao.disabled = false; return; }
+      escrever("Reconhecidas: " + corpo.reconhecidos.join(", ") + ".");
       quadroAtivo = document.querySelector(form.dataset.alvo);
       if (quadroAtivo) { quadroAtivo.hidden = false; quadroAtivo.scrollIntoView({ block: "nearest" }); }
       acompanhar();
     } catch (erro) {
-      if (mensagem) mensagem.textContent = "Falha no envio: " + erro;
+      escrever("Falha no envio: " + erro.message);
       botao.disabled = false;
     }
   });
@@ -258,10 +290,23 @@
     acompanhar();
   }
 
+  let falhasSeguidas = 0;
   async function acompanhar() {
     const alvo = document.getElementById("estado-validacao");
-    const resposta = await fetch("/validar/estado");
-    const estado = await resposta.json();
+    let estado;
+    try {
+      const resposta = await fetch("/validar/estado");
+      if (resposta.status === 401) { window.location.reload(); return; }
+      estado = await resposta.json();
+      falhasSeguidas = 0;
+    } catch (erro) {  // servidor reiniciando ou conexão instável: continua acompanhando
+      falhasSeguidas += 1;
+      const quadro = quadroAtivo || document.querySelector("[data-progresso]");
+      const texto = quadro && quadro.querySelector("[data-progresso-texto]");
+      if (texto) texto.textContent = "Sem resposta do servidor; tentando de novo…";
+      if (falhasSeguidas < 120) setTimeout(acompanhar, 3000);
+      return;
+    }
     if (alvo) alvo.textContent = estado.rodando ? `Validando: ${estado.mensagem}` : (estado.erro ? `Falha: ${estado.erro}` : estado.mensagem);
     const quadro = quadroAtivo || document.querySelector(estado.tipo === "importar_bases" ? "[data-progresso-bases]" : "[data-progresso]");
     if (quadro && (estado.rodando || estado.erro)) {

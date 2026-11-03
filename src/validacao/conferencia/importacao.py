@@ -294,17 +294,28 @@ def persistir(session: Session, lote: cf.Lote, linhas: list[Linha], componente: 
     lote.lidos = len(linhas)
     campos = sorted({linha.campo for linha in linhas})
     vigentes = {}
-    if campos:
-        for registro in session.scalars(
-            select(cf.Registro).where(
+    if campos:  # só as colunas necessárias: objetos ORM de 200 mil registros custavam ~1 GB de memória
+        for id_registro, id_ente, exercicio, campo, valor, estado, periodo_atual, versao in session.execute(
+            select(cf.Registro.id, cf.Registro.id_ente, cf.Registro.exercicio, cf.Registro.campo, cf.Registro.valor_centavos,
+                   cf.Registro.estado, cf.Registro.periodo, cf.Registro.versao).where(
                 cf.Registro.declaracao_id == declaracao, cf.Registro.campo.in_(campos), cf.Registro.vigente.is_(True)
             )
         ):
-            vigentes[(registro.id_ente, registro.exercicio, registro.campo)] = registro
+            vigentes[(id_ente, exercicio, campo)] = (id_registro, valor, estado, periodo_atual, versao)
     novos = repetidos = versoes = 0
     inserir = []
     substituidos = []
+    def descarregar(limite: int) -> None:  # grava em blocos para não acumular centenas de milhares de linhas
+        if len(inserir) < limite:
+            return
+        for inicio in range(0, len(substituidos), 500):
+            session.execute(update(cf.Registro).where(cf.Registro.id.in_(substituidos[inicio:inicio + 500])).values(vigente=False))
+        session.execute(insert(cf.Registro), inserir)
+        substituidos.clear()
+        inserir.clear()
+
     for linha in linhas:
+        descarregar(5000)
         periodo_linha = linha.periodo or periodo
         chave = (linha.id_ente, linha.exercicio, linha.campo)
         base = {
@@ -319,20 +330,19 @@ def persistir(session: Session, lote: cf.Lote, linhas: list[Linha], componente: 
             inserir.append({**base, "versao": 0, "vigente": False})
             continue
         atual = vigentes.get(chave)
-        if atual is not None and (atual.valor_centavos, atual.estado, atual.periodo) == (linha.valor, linha.estado, periodo_linha):
+        if atual is not None and atual[1:4] == (linha.valor, linha.estado, periodo_linha):
             repetidos += 1
             continue
         if atual is not None:
-            substituidos.append(atual.id)
-            inserir.append({**base, "versao": atual.versao + 1, "vigente": True, "substitui_id": atual.id})
+            substituidos.append(atual[0])
+            inserir.append({**base, "versao": atual[4] + 1, "vigente": True, "substitui_id": atual[0]})
             versoes += 1
         else:
             inserir.append({**base, "versao": 1, "vigente": True})
             novos += 1
-    for inicio in range(0, len(substituidos), 500):
+    descarregar(1)
+    for inicio in range(0, len(substituidos), 500):  # substituições sem linha nova pendente (não ocorre, por segurança)
         session.execute(update(cf.Registro).where(cf.Registro.id.in_(substituidos[inicio:inicio + 500])).values(vigente=False))
-    for inicio in range(0, len(inserir), 2000):
-        session.execute(insert(cf.Registro), inserir[inicio:inicio + 2000])
     lote.novos = novos
     lote.repetidos = repetidos
     lote.novas_versoes = versoes

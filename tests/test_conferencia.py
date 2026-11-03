@@ -1030,3 +1030,35 @@ def test_pacote_siconfi_em_banco_vazio(tmp_path):
         session.commit()
         assert session.get(Ente, 29).uf == "BA"
         assert session.scalar(select(func.count()).select_from(EnteCodigoExterno).where(EnteCodigoExterno.id_ente == 2927408)) == 4
+
+
+def test_envio_arquivo_por_arquivo(tmp_path):
+    """A tela envia um arquivo por pedido (com novas tentativas) e depois importa pelos tokens."""
+    import time
+
+    destino = tmp_path / "envio.sqlite"
+    construir(destino)
+    planilhas = _planilhas_fixas()
+    with TestClient(criar_app(destino)) as cliente:
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
+        tokens = []
+        for nome, conteudo in planilhas.items():
+            resposta = cliente.post("/importar/envio", files={"arquivo": (nome, conteudo)})
+            assert resposta.json()["ok"]
+            tokens.append(resposta.json()["token"])
+        assert cliente.post("/importar/bases", data={"tokens": ["../../etc"]}).status_code == 400
+        assert cliente.post("/importar/bases", data={"tokens": ["0" * 24]}).status_code == 400  # expirado/inexistente
+        resposta = cliente.post("/importar/bases", data={"tokens": tokens})
+        assert resposta.json()["ok"], resposta.json()
+        for _ in range(240):
+            estado = cliente.get("/validar/estado").json()
+            if not estado["rodando"]:
+                break
+            time.sleep(0.5)
+        assert not estado["erro"] and estado["execucao"]
+        # o token de outra pessoa não serve
+        outro = cliente.post("/importar/envio", files={"arquivo": ("dca.xlsx", planilhas["dca.xlsx"])}).json()["token"]
+        cliente.post("/sair")
+        _entrar(cliente, destino, "Outra pessoa", "ANALISTA", "/")
+        assert "outro usuário" in cliente.post("/importar/bases", data={"tokens": [outro]}).json()["erro"]
+    assert not list((tmp_path / "importacoes" / "pendentes").glob("base-*"))

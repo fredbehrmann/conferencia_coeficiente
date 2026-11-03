@@ -679,30 +679,108 @@ def criar_app(banco: Path | None = None) -> FastAPI:
             return JSONResponse({"ok": False, "erro": str(erro)}, status_code=409)
         return JSONResponse({"ok": True, "tarefa": tarefa_id})
 
+    pendentes_envio = pasta_importacoes / "pendentes"
+
+    def _limpar_envios_antigos(horas: int = 24) -> None:
+        import time
+
+        limite = time.time() - horas * 3600
+        for caminho in pendentes_envio.glob("envio-*"):
+            try:
+                if caminho.stat().st_mtime < limite:
+                    caminho.unlink()
+            except OSError:
+                pass
+
+    @app.post("/importar/envio")
+    async def importar_envio(request: Request):
+        """Recebe UM arquivo e o guarda até a importação começar.
+
+        A tela envia as planilhas uma a uma (com nova tentativa se a conexão cair) em vez de um
+        único pedido grande, que proxies como o da Railway podem interromper.
+        """
+        import shutil
+
+        formulario = await request.form()
+        arquivo = formulario.get("arquivo")
+        with sessao() as session:
+            usuario = exigir(request, session)
+            usuario_id = usuario.id
+        if arquivo is None or not getattr(arquivo, "filename", ""):
+            return JSONResponse({"ok": False, "erro": "Nenhum arquivo recebido."}, status_code=400)
+        pendentes_envio.mkdir(parents=True, exist_ok=True)
+        _limpar_envios_antigos()
+        token = secrets.token_hex(12)
+        with open(pendentes_envio / f"envio-{token}.bin", "wb") as saida:
+            shutil.copyfileobj(arquivo.file, saida, 1024 * 1024)
+        (pendentes_envio / f"envio-{token}.json").write_text(
+            json.dumps({"nome": Path(arquivo.filename).name, "usuario_id": usuario_id}, ensure_ascii=False), encoding="utf-8")
+        return JSONResponse({"ok": True, "token": token})
+
+    async def _arquivos_enviados(request: Request, formulario, usuario_id: int) -> list[tuple[str, Path, bool]]:
+        """Arquivos do pedido: os já enviados (campo `tokens`) ou os anexados (campo `arquivos`).
+
+        Devolve (nome, caminho, temporário) — os temporários anexados devem ser apagados por quem chamou.
+        """
+        import re as _re
+        import shutil
+
+        resultado = []
+        for token in formulario.getlist("tokens"):
+            token = str(token)
+            if not _re.fullmatch(r"[0-9a-f]{24}", token):
+                raise ValueError("Envio inválido.")
+            meta = pendentes_envio / f"envio-{token}.json"
+            corpo = pendentes_envio / f"envio-{token}.bin"
+            if not meta.is_file() or not corpo.is_file():
+                raise ValueError("Um dos arquivos enviados expirou; envie de novo.")
+            dados = json.loads(meta.read_text(encoding="utf-8"))
+            if dados.get("usuario_id") != usuario_id:
+                raise ValueError("Envio de outro usuário.")
+            resultado.append((dados["nome"], corpo, True))
+        pendentes_envio.mkdir(parents=True, exist_ok=True)
+        for arquivo in formulario.getlist("arquivos"):
+            if not getattr(arquivo, "filename", ""):
+                continue
+            caminho = pendentes_envio / f"envio-{secrets.token_hex(12)}.bin"
+            with open(caminho, "wb") as saida:
+                shutil.copyfileobj(arquivo.file, saida, 1024 * 1024)
+            resultado.append((Path(arquivo.filename).name, caminho, True))
+        return resultado
+
+    def _descartar(arquivos) -> None:
+        for _nome, caminho, temporario in arquivos:
+            if temporario:
+                Path(caminho).unlink(missing_ok=True)
+                Path(caminho).with_suffix(".json").unlink(missing_ok=True)
+
     @app.post("/importar/bases")
     async def importar_bases(request: Request):
-        """Recebe as planilhas de layout fixo (DCA, SIOPE, SIOPS, TCE) e importa em segundo plano."""
+        """Importa as planilhas de layout fixo (DCA, SIOPE, SIOPS, TCE) em segundo plano."""
         from validacao.conferencia import bases_fixas
 
         formulario = await request.form()
-        enviados = [f for f in formulario.getlist("arquivos") if getattr(f, "filename", "")]
         with sessao() as session:
             usuario = exigir(request, session)
-            nome_usuario = usuario.nome
-        if not enviados:
-            return JSONResponse({"ok": False, "erro": "Escolha ao menos uma planilha."}, status_code=400)
-        arquivos = [(f.filename, await f.read()) for f in enviados]
+            nome_usuario, usuario_id = usuario.nome, usuario.id
         try:
-            ordenados = bases_fixas.ordenar(arquivos)  # recusa já aqui o que não for reconhecido
-        except bases_fixas.LayoutDesconhecido as erro:
+            arquivos = await _arquivos_enviados(request, formulario, usuario_id)
+        except ValueError as erro:
             return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
-        pendentes = pasta_importacoes / "pendentes"
-        pendentes.mkdir(parents=True, exist_ok=True)
+        if not arquivos:
+            return JSONResponse({"ok": False, "erro": "Escolha ao menos uma planilha."}, status_code=400)
         lista = []
-        for fonte, nome, conteudo in ordenados:
-            caminho = pendentes / f"base-{secrets.token_hex(6)}-{fonte}.xlsx"
-            caminho.write_bytes(conteudo)
-            lista.append({"nome": nome, "caminho": str(caminho), "fonte": fonte})
+        try:
+            try:
+                ordenados = bases_fixas.ordenar([(nome, caminho.read_bytes()) for nome, caminho, _t in arquivos])
+            except bases_fixas.LayoutDesconhecido as erro:
+                return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+            for fonte, nome, conteudo in ordenados:
+                caminho = pendentes_envio / f"base-{secrets.token_hex(6)}-{fonte}.xlsx"
+                caminho.write_bytes(conteudo)
+                lista.append({"nome": nome, "caminho": str(caminho), "fonte": fonte})
+        finally:
+            _descartar(arquivos)
         try:
             tarefa_id = tarefas.iniciar(destino, "importar_bases", {"arquivos": lista}, nome_usuario)
         except tarefas.Ocupado as erro:
@@ -714,42 +792,32 @@ def criar_app(banco: Path | None = None) -> FastAPI:
 
     @app.post("/importar/siconfi/arquivos")
     async def importar_siconfi_arquivos(request: Request):
-        """Recebe o pacote do SICONFI pela tela (CSV soltos ou um ZIP) e importa em segundo plano."""
-        import shutil
-        import tempfile
-
-        from validacao.conferencia.pacote_siconfi import PacoteInvalido, receber
+        """Importa o pacote do SICONFI enviado pela tela (CSV soltos ou um ZIP) em segundo plano."""
+        from validacao.conferencia.pacote_siconfi import NOMES_ARQUIVO, PacoteInvalido, receber
 
         formulario = await request.form()
-        enviados = [f for f in formulario.getlist("arquivos") if getattr(f, "filename", "")]
         with sessao() as session:
             usuario = exigir(request, session)
-            nome_usuario = usuario.nome
-        if not enviados:
+            nome_usuario, usuario_id = usuario.nome, usuario.id
+        try:
+            arquivos = await _arquivos_enviados(request, formulario, usuario_id)
+        except ValueError as erro:
+            return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+        if not arquivos:
             return JSONResponse({"ok": False, "erro": "Escolha os arquivos do pacote."}, status_code=400)
         if tarefas.ativa_escrita(destino) is not None:
+            _descartar(arquivos)
             return JSONResponse({"ok": False, "erro": "Já há uma importação ou validação em andamento."}, status_code=409)
-        pasta_pacote_enviado.parent.mkdir(parents=True, exist_ok=True)
-        recebidos = Path(tempfile.mkdtemp(prefix="envio-", dir=pasta_pacote_enviado.parent))
         try:
-            caminhos = []
-            for posicao, arquivo in enumerate(enviados):
-                caminho = recebidos / f"{posicao}.bin"
-                with open(caminho, "wb") as saida:
-                    shutil.copyfileobj(arquivo.file, saida, 1024 * 1024)
-                caminhos.append((Path(arquivo.filename).name, caminho))
-            try:
-                reconhecidos = receber(caminhos, pasta_pacote_enviado)
-            except PacoteInvalido as erro:
-                return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+            reconhecidos = receber([(nome, caminho) for nome, caminho, _t in arquivos], pasta_pacote_enviado)
+        except PacoteInvalido as erro:
+            return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
         finally:
-            shutil.rmtree(recebidos, ignore_errors=True)
+            _descartar(arquivos)
         try:
             tarefa_id = tarefas.iniciar(destino, "importar_siconfi", {"pasta": str(pasta_pacote_enviado)}, nome_usuario)
         except tarefas.Ocupado as erro:
             return JSONResponse({"ok": False, "erro": str(erro)}, status_code=409)
-        from validacao.conferencia.pacote_siconfi import NOMES_ARQUIVO
-
         return JSONResponse({"ok": True, "tarefa": tarefa_id,
                              "reconhecidos": [NOMES_ARQUIVO[c] for c in ("base", "rreo", "msc", "cobertura", "status") if c in reconhecidos]})
 
