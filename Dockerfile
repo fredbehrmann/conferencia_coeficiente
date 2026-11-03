@@ -30,7 +30,6 @@ RUN useradd --create-home --uid 1000 conferencia \
 
 USER conferencia
 WORKDIR /app/src
-VOLUME ["/dados"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
