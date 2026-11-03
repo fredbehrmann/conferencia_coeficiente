@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block titulo %}Minha senha{% endblock %}
+{% block conteudo %}
+<div class="bloco" style="max-width: 460px; margin: 30px auto">
+  <h2>{% if usuario.trocar_senha %}Defina sua senha{% else %}Alterar minha senha{% endif %}</h2>
+  {% if usuario.trocar_senha %}<p>Você entrou com uma senha provisória. Escolha uma senha só sua para continuar.</p>{% endif %}
+  <p class="sutil">Conta <b class="mono">{{ usuario.login }}</b> · {{ usuario.nome }}. Mínimo de {{ minimo }} caracteres, com pelo menos três tipos entre minúsculas, maiúsculas, números e símbolos, sem o login ou o nome.</p>
+  <form method="post" action="/minha-senha">
+    <input type="text" name="login" value="{{ usuario.login }}" autocomplete="username" hidden>
+    <div class="campo" style="margin-bottom: 10px"><label for="atual">Senha atual{% if usuario.trocar_senha %} (provisória){% endif %}</label><input id="atual" name="atual" type="password" required autocomplete="current-password" autofocus></div>
+    <div class="campo" style="margin-bottom: 10px"><label for="nova">Nova senha</label><input id="nova" name="nova" type="password" required minlength="{{ minimo }}" autocomplete="new-password"></div>
+    <div class="campo" style="margin-bottom: 14px"><label for="confirmacao">Repita a nova senha</label><input id="confirmacao" name="confirmacao" type="password" required minlength="{{ minimo }}" autocomplete="new-password"></div>
+    <button class="primario" type="submit">Salvar senha</button>
+  </form>
+</div>
+{% endblock %}

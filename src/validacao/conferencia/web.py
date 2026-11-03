@@ -57,13 +57,14 @@ def ESCOPO_EXERCICIOS(componente: str) -> list[int]:
 
 NOME_COMPONENTES = {}
 from validacao.conferencia.regras import GRAVIDADES, ORDEM, REGRAS
+from validacao.conferencia import acesso as contas
 from validacao.conferencia import tarefas
 from validacao.conferencia.cache import CachePorVersao
 from validacao.db import BANCO_PADRAO, criar_engine
 from validacao.modelos import Ente, Usuario
 
 PASTA = Path(__file__).resolve().parent
-PERFIS = ("ANALISTA", "REVISOR", "ADMINISTRADOR")
+PERFIS = contas.PERFIS
 UFS = ("AC AL AM AP BA CE DF ES GO MA MG MS MT PA PB PE PI PR RJ RN RO RR RS SC SE SP TO").split()
 COLUNAS_PADRAO = ["SICONFI_DCA", "SICONFI_RREO", "SICONFI_MSC", "SIOPE", "SIOPS", "TCE"]
 ESTADOS = {"VALOR": "Valor", "ZERO": "Zero declarado", "AUSENTE": "Célula vazia", "INVALIDO": "Formato inválido",
@@ -119,9 +120,8 @@ def criar_app(banco: Path | None = None) -> FastAPI:
 
     app = FastAPI(lifespan=vida, title="Conferência do coeficiente de participação")
     segredo = os.environ.get("CONFERENCIA_SEGREDO") or _segredo(destino)
-    senha_acesso = os.environ.get("CONFERENCIA_SENHA", "")
     app.add_middleware(SessionMiddleware, secret_key=segredo, same_site="lax", session_cookie="conferencia",
-                       https_only=os.environ.get("CONFERENCIA_COOKIE_SEGURO") == "1")
+                       https_only=os.environ.get("CONFERENCIA_COOKIE_SEGURO") == "1", max_age=12 * 3600)
     app.mount("/estatico", StaticFiles(directory=str(PASTA / "estatico")), name="estatico")
     templates = Jinja2Templates(directory=str(PASTA / "templates"))
     _ambiente(templates)
@@ -130,15 +130,28 @@ def criar_app(banco: Path | None = None) -> FastAPI:
         return Session(app.state.engine)
 
     def usuario_atual(request: Request, session: Session) -> Usuario | None:
+        """Pessoa da sessão, se a conta continua ativa e a senha não mudou desde a entrada."""
         usuario_id = request.session.get("usuario_id")
-        return session.get(Usuario, usuario_id) if usuario_id else None
+        if not usuario_id:
+            return None
+        credencial = contas.acesso_de(session, usuario_id)
+        if credencial is None or not credencial.ativo or credencial.versao_sessao != request.session.get("versao"):
+            request.session.clear()
+            return None
+        usuario = session.get(Usuario, usuario_id)
+        if usuario is not None:
+            usuario.login = credencial.login
+            usuario.trocar_senha = credencial.trocar_senha
+            usuario.administrador = usuario.perfil == "ADMINISTRADOR"
+        return usuario
 
     def pagina(request: Request, nome: str, session: Session, usuario, status: int = 200, **contexto):
         demo = configuracao(session, "demonstracao", False)
         contexto.update(
             usuario=usuario, demo=demo, aba=contexto.get("aba", ""), aviso=request.session.pop("aviso", None),
-            erro=contexto.get("erro") or request.session.pop("erro", None), validacao=tarefas.resumo(destino),
-            execucao_atual=contexto.get("execucao_atual") or ultima_execucao(session),
+            erro=contexto.get("erro") or request.session.pop("erro", None),
+            validacao=tarefas.resumo(destino) if usuario else None,
+            execucao_atual=(contexto.get("execucao_atual") or ultima_execucao(session)) if usuario else None,
         )
         return templates.TemplateResponse(request, nome, contexto, status_code=status)
 
@@ -149,6 +162,14 @@ def criar_app(banco: Path | None = None) -> FastAPI:
 
             volta = str(request.url.path) + ("?" + request.url.query if request.url.query else "")
             raise HTTPException(status_code=303, headers={"Location": f"/login?volta={quote(volta)}"})
+        if usuario.trocar_senha and request.url.path != "/minha-senha":
+            raise HTTPException(status_code=303, headers={"Location": "/minha-senha"})
+        return usuario
+
+    def exigir_admin(request: Request, session: Session):
+        usuario = exigir(request, session)
+        if not usuario.administrador:
+            raise HTTPException(status_code=403, detail="Somente administradores.")
         return usuario
 
     # ------------------------------------------------------------------ login
@@ -159,34 +180,121 @@ def criar_app(banco: Path | None = None) -> FastAPI:
             session.execute(select(1))
         return JSONResponse({"ok": True})
 
+    def _contexto_login(session):
+        from validacao.conferencia.demo import LOGIN_DEMO, SENHA_DEMO
+
+        demo = configuracao(session, "demonstracao", False)
+        return {"credencial_demo": (LOGIN_DEMO, SENHA_DEMO) if demo else None}
+
     @app.get("/login", response_class=HTMLResponse)
     def login_form(request: Request, volta: str = "/visao"):
         with sessao() as session:
-            return pagina(request, "login.html", session, None, volta=volta, perfis=PERFIS, pede_senha=bool(senha_acesso))
+            return pagina(request, "login.html", session, None, volta=volta, **_contexto_login(session))
 
     @app.post("/login")
-    def login(request: Request, nome: str = Form(""), perfil: str = Form("ANALISTA"), volta: str = Form("/visao"),
-              senha: str = Form("")):
-        nome = nome.strip()
+    def login(request: Request, login: str = Form(""), senha: str = Form(""), volta: str = Form("/visao")):
         with sessao() as session:
-            if senha_acesso and not secrets.compare_digest(senha.encode(), senha_acesso.encode()):
-                return pagina(request, "login.html", session, None, status=401, volta=volta, perfis=PERFIS,
-                              pede_senha=True, erro="Senha de acesso incorreta.")
-            if not nome or perfil not in PERFIS:
-                return pagina(request, "login.html", session, None, status=400, volta=volta, perfis=PERFIS,
-                              pede_senha=bool(senha_acesso), erro="Informe o nome e o perfil.")
-            usuario = session.scalar(select(Usuario).where(Usuario.nome == nome))
-            if usuario is None:
-                usuario = Usuario(nome=nome, perfil=perfil)
-                session.add(usuario)
-                session.commit()
+            try:
+                usuario, credencial = contas.autenticar(session, login, senha)
+            except contas.AcessoRecusado as motivo:
+                return pagina(request, "login.html", session, None, status=401, volta=volta, login=login,
+                              erro=str(motivo), **_contexto_login(session))
+            request.session.clear()
             request.session["usuario_id"] = usuario.id
-        return RedirectResponse(volta if volta.startswith("/") else "/", status_code=303)
+            request.session["versao"] = credencial.versao_sessao
+            destino_volta = volta if volta.startswith("/") and not volta.startswith("//") else "/"
+            if credencial.trocar_senha:
+                destino_volta = "/minha-senha"
+        return RedirectResponse(destino_volta, status_code=303)
 
     @app.post("/sair")
     def sair(request: Request):
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
+
+    @app.get("/minha-senha", response_class=HTMLResponse)
+    def minha_senha_form(request: Request):
+        with sessao() as session:
+            usuario = exigir(request, session)
+            return pagina(request, "minha_senha.html", session, usuario, minimo=contas.TAMANHO_MINIMO)
+
+    @app.post("/minha-senha")
+    def minha_senha(request: Request, atual: str = Form(""), nova: str = Form(""), confirmacao: str = Form("")):
+        with sessao() as session:
+            usuario = exigir(request, session)
+            credencial = contas.acesso_de(session, usuario.id)
+            erro = None
+            if not contas.conferir_senha(atual, credencial.senha_hash):
+                erro = "A senha atual não confere."
+            elif nova != confirmacao:
+                erro = "A confirmação é diferente da nova senha."
+            else:
+                try:
+                    contas.definir_senha(session, usuario.id, nova, trocar_senha=False)
+                except contas.AcessoRecusado as motivo:
+                    erro = str(motivo)
+            if erro:
+                return pagina(request, "minha_senha.html", session, usuario, status=400, erro=erro,
+                              minimo=contas.TAMANHO_MINIMO)
+            request.session["versao"] = contas.acesso_de(session, usuario.id).versao_sessao
+            request.session["aviso"] = "Senha alterada."
+        return RedirectResponse("/visao", status_code=303)
+
+    # ------------------------------------------------------------ usuários
+    @app.get("/usuarios", response_class=HTMLResponse)
+    def usuarios(request: Request):
+        with sessao() as session:
+            usuario = exigir_admin(request, session)
+            senha_gerada = request.session.pop("senha_gerada", None)
+            return pagina(request, "usuarios.html", session, usuario, aba="usuarios", contas=contas.contas(session),
+                          perfis=PERFIS, descricao_perfil=contas.DESCRICAO_PERFIL, senha_gerada=senha_gerada,
+                          sugestao=contas.gerar_senha(), minimo=contas.TAMANHO_MINIMO, agora=datetime.now())
+
+    def _volta_usuarios(request: Request, aviso: str | None = None, erro: str | None = None):
+        if aviso:
+            request.session["aviso"] = aviso
+        if erro:
+            request.session["erro"] = erro
+        return RedirectResponse("/usuarios", status_code=303)
+
+    @app.post("/usuarios")
+    def usuarios_criar(request: Request, login: str = Form(""), nome: str = Form(""), perfil: str = Form("ANALISTA"),
+                       senha: str = Form(""), trocar_senha: str = Form("")):
+        with sessao() as session:
+            autor = exigir_admin(request, session)
+            try:
+                novo = contas.criar_conta(session, login, nome, perfil, senha, criado_por=autor.nome,
+                                          trocar_senha=bool(trocar_senha))
+            except contas.AcessoRecusado as motivo:
+                return _volta_usuarios(request, erro=str(motivo))
+            request.session["senha_gerada"] = {"login": contas.normalizar_login(login), "nome": novo.nome, "senha": senha,
+                                               "trocar": bool(trocar_senha)}
+            return _volta_usuarios(request, aviso=f"Conta {contas.normalizar_login(login)} criada para {novo.nome}.")
+
+    @app.post("/usuarios/{usuario_id}/senha")
+    def usuarios_senha(request: Request, usuario_id: int):
+        with sessao() as session:
+            exigir_admin(request, session)
+            nova = contas.gerar_senha()
+            try:
+                contas.definir_senha(session, usuario_id, nova, trocar_senha=True)
+            except contas.AcessoRecusado as motivo:
+                return _volta_usuarios(request, erro=str(motivo))
+            credencial = contas.acesso_de(session, usuario_id)
+            pessoa = session.get(Usuario, usuario_id)
+            request.session["senha_gerada"] = {"login": credencial.login, "nome": pessoa.nome, "senha": nova, "trocar": True}
+            return _volta_usuarios(request, aviso=f"Senha de {credencial.login} redefinida.")
+
+    @app.post("/usuarios/{usuario_id}/alterar")
+    def usuarios_alterar(request: Request, usuario_id: int, perfil: str = Form(""), ativo: str = Form("")):
+        with sessao() as session:
+            autor = exigir_admin(request, session)
+            try:
+                contas.alterar_conta(session, usuario_id, autor.id, perfil=perfil or None,
+                                     ativo={"1": True, "0": False}.get(ativo))
+            except contas.AcessoRecusado as motivo:
+                return _volta_usuarios(request, erro=str(motivo))
+            return _volta_usuarios(request, aviso="Conta atualizada.")
 
     # ------------------------------------------------------------ visão geral
     @app.get("/visao", response_class=HTMLResponse)
@@ -638,7 +746,10 @@ def criar_app(banco: Path | None = None) -> FastAPI:
             ])
 
     @app.get("/validar/estado")
-    def validar_estado():
+    def validar_estado(request: Request):
+        with sessao() as session:
+            if usuario_atual(request, session) is None:
+                return JSONResponse({"erro": "Sessão encerrada."}, status_code=401)
         return JSONResponse(tarefas.resumo(destino))
 
     @app.get("/fontes", response_class=HTMLResponse)

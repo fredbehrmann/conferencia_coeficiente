@@ -1,0 +1,11 @@
+# Configuração da Railway (lida automaticamente no deploy). Ver README, "Publicar na Railway".
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/saude"
+# a primeira subida migra o banco e pode validar: dê tempo antes de considerar falha
+healthcheckTimeout = 600
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

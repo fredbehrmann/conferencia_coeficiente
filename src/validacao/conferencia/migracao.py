@@ -153,6 +153,9 @@ def preparar(engine: Engine, usuario: str = "sistema") -> None:
         if configuracao(session, "versao_esquema") is None:
             definir_configuracao(session, "versao_esquema", VERSAO_ESQUEMA)
         session.commit()
+        from validacao.conferencia.acesso import garantir_admin
+
+        garantir_admin(session)
 
 
 def migrar(engine: Engine, usuario: str = "migracao") -> dict:

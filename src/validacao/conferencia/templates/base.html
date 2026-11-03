@@ -25,9 +25,11 @@
     <a href="/cobertura" class="{{ 'ativa' if aba == 'cobertura' }}">Cobertura</a>
     <a href="/regras" class="{{ 'ativa' if aba == 'regras' }}">Regras</a>
     <a href="/fontes" class="{{ 'ativa' if aba == 'fontes' }}">Fontes e metodologia</a>
+    {% if usuario.administrador %}<a href="/usuarios" class="{{ 'ativa' if aba == 'usuarios' }}">Usuários</a>{% endif %}
   </nav>
   <div class="usuario">
     <span>{{ usuario.nome }} · {{ usuario.perfil|lower }}</span>
+    <a href="/minha-senha">Minha senha</a>
     <form method="post" action="/sair"><button class="discreto pequeno" type="submit">Sair</button></form>
   </div>
   {% endif %}

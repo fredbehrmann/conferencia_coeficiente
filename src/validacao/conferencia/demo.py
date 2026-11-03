@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from validacao.conferencia import importacao
+from validacao.conferencia.acesso import gerar_hash
 from validacao.conferencia.decisao import registrar
 from validacao.conferencia.execucao import executar
 from validacao.conferencia.migracao import definir_configuracao, garantir_conjunto, preparar
@@ -29,6 +30,10 @@ from validacao.db import criar_engine
 from validacao.modelos import Ente, Usuario
 
 ANOS = list(range(2019, 2026))
+# Conta da base de demonstração (dados fictícios); a senha aparece na tela de entrada da demonstração.
+LOGIN_DEMO = "analista"
+SENHA_DEMO = "Demonstracao-2026"
+
 DATA_CORTE = "2026-12-31"
 
 ENTES = {
@@ -198,6 +203,9 @@ def construir(destino: Path, sobrescrever: bool = True) -> dict:
             session.add(Ente(id_ente=codigo, esfera="MUNICIPIO", uf="XX", nome=nome, capital=False, tribunal_competente="TCE-XX"))
         analista = Usuario(nome="Analista de demonstração", perfil="ANALISTA")
         session.add(analista)
+        session.flush()
+        session.add(cf.Acesso(usuario_id=analista.id, login=LOGIN_DEMO, senha_hash=gerar_hash(SENHA_DEMO), ativo=True,
+                              trocar_senha=False, criado_em=datetime.now(), criado_por="demonstração"))
         definir_configuracao(session, "demonstracao", True)
         definir_configuracao(session, "migrado_em", "demonstração")
         conjunto = garantir_conjunto(session, "demonstração")

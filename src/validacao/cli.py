@@ -67,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     backup.set_defaults(func=_backup)
 
     servir = subcomandos.add_parser("servir", help="Abre a central de conferência neste computador")
-    servir.add_argument("--porta", type=int, default=int(os.environ.get("CONFERENCIA_PORTA", "8000")))
+    servir.add_argument("--porta", type=int,  # PORT: definida pela Railway e outras plataformas
+                        default=int(os.environ.get("PORT") or os.environ.get("CONFERENCIA_PORTA") or "8000"))
     servir.add_argument("--host", default=os.environ.get("CONFERENCIA_HOST", "127.0.0.1"),
                         help="Endereço de escuta (0.0.0.0 num servidor ou no Docker)")
     servir.set_defaults(func=_servir)
@@ -103,6 +104,21 @@ def main(argv: list[str] | None = None) -> int:
     nuvem_cmd.add_argument("--forcar", action="store_true", help="Grava mesmo que a última cópia tenha menos de 24 h")
     nuvem_cmd.set_defaults(func=_copia_nuvem)
 
+    usuario_cmd = subcomandos.add_parser("usuario", help="Contas de acesso: listar, criar, redefinir senha, ativar/desativar")
+    usuario_sub = usuario_cmd.add_subparsers(dest="acao", required=True)
+    usuario_sub.add_parser("listar", help="Lista as contas")
+    criar_cmd = usuario_sub.add_parser("criar", help="Cria uma conta (a senha é gerada e mostrada uma vez)")
+    criar_cmd.add_argument("login")
+    criar_cmd.add_argument("--nome", required=True, help="Nome completo (assina as decisões)")
+    criar_cmd.add_argument("--perfil", default="ANALISTA", choices=("ANALISTA", "REVISOR", "ADMINISTRADOR"))
+    senha_cmd = usuario_sub.add_parser("senha", help="Gera uma senha provisória nova para a conta (use para recuperar o admin)")
+    senha_cmd.add_argument("login")
+    senha_cmd.add_argument("--definitiva", action="store_true", help="Não exige troca no próximo acesso")
+    for acao in ("desativar", "ativar"):
+        sub = usuario_sub.add_parser(acao, help=f"{acao.capitalize()} a conta")
+        sub.add_argument("login")
+    usuario_cmd.set_defaults(func=_usuario)
+
     tarefa_cmd = subcomandos.add_parser("tarefa", help="(uso interno) executa uma tarefa em segundo plano")
     tarefa_cmd.add_argument("tarefa_id")
     tarefa_cmd.set_defaults(func=_tarefa)
@@ -118,6 +134,56 @@ def main(argv: list[str] | None = None) -> int:
 
         mover_para_pasta_local(progresso=lambda m: print(m, flush=True))
     return argumentos.func(argumentos)
+
+
+def _usuario(argumentos) -> int:
+    from sqlalchemy import select
+
+    from validacao.conferencia import acesso as contas
+    from validacao.conferencia import modelos as cf
+    from validacao.conferencia.migracao import preparar
+
+    engine = criar_engine(argumentos.banco or BANCO_PADRAO)
+    preparar(engine)
+    with Session(engine) as session:
+        if argumentos.acao == "listar":
+            for pessoa, credencial in contas.contas(session):
+                if credencial is None:
+                    print(f"{'—':<22} {pessoa.perfil:<14} {'sem login':<12} {pessoa.nome}")
+                else:
+                    situacao = "ativa" if credencial.ativo else "desativada"
+                    print(f"{credencial.login:<22} {pessoa.perfil:<14} {situacao:<12} {pessoa.nome}")
+            return 0
+        if argumentos.acao == "criar":
+            senha = contas.gerar_senha()
+            try:
+                contas.criar_conta(session, argumentos.login, argumentos.nome, argumentos.perfil, senha,
+                                   criado_por="linha de comando", trocar_senha=True)
+            except contas.AcessoRecusado as motivo:
+                print(f"Não foi possível criar: {motivo}")
+                return 1
+            print(f"Conta {contas.normalizar_login(argumentos.login)} criada. Senha provisória (troca obrigatória no 1º acesso):")
+            print(senha)
+            return 0
+        credencial = session.scalar(select(cf.Acesso).where(cf.Acesso.login == contas.normalizar_login(argumentos.login)))
+        if credencial is None:
+            print(f"Não há conta com o login {argumentos.login}.")
+            return 1
+        try:
+            if argumentos.acao == "senha":
+                senha = contas.gerar_senha()
+                contas.definir_senha(session, credencial.usuario_id, senha, trocar_senha=not argumentos.definitiva)
+                credencial.ativo, credencial.falhas, credencial.bloqueado_ate = True, 0, None
+                session.commit()
+                print(f"Nova senha de {credencial.login}{'' if argumentos.definitiva else ' (troca obrigatória no próximo acesso)'}:")
+                print(senha)
+            else:
+                contas.alterar_conta(session, credencial.usuario_id, autor_id=0, ativo=argumentos.acao == "ativar")
+                print(f"Conta {credencial.login} {'ativada' if argumentos.acao == 'ativar' else 'desativada'}.")
+        except contas.AcessoRecusado as motivo:
+            print(f"Não foi possível: {motivo}")
+            return 1
+    return 0
 
 
 def _init(argumentos) -> int:

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block titulo %}Usuários{% endblock %}
+{% block conteudo %}
+{% if senha_gerada %}
+<section class="bloco senha-gerada" role="status">
+  <h2>Senha de {{ senha_gerada.nome }}</h2>
+  <p>Login <b class="mono">{{ senha_gerada.login }}</b> · senha <b class="mono" id="senha-nova">{{ senha_gerada.senha }}</b>
+    <button class="pequeno" type="button" data-copiar="senha-nova">Copiar</button></p>
+  <p class="sutil" style="margin-bottom: 0">Esta senha aparece só agora; ela não fica guardada. Entregue-a por um canal reservado.{% if senha_gerada.trocar %} No primeiro acesso a pessoa será obrigada a trocá-la.{% endif %}</p>
+</section>
+{% endif %}
+
+<section class="bloco">
+  <h2>Contas de acesso</h2>
+  <p class="sutil">Só quem tem conta ativa vê os dados. Desativar encerra na hora as sessões abertas da pessoa; as decisões dela continuam registradas. Pessoas sem login vêm de decisões anteriores ao controle de acesso: crie a conta com o mesmo nome para ligar o histórico.</p>
+  <div class="tabela-quadro quadro-contas">
+  <table class="tabela-simples usuarios">
+    <thead><tr><th>Nome</th><th>Login</th><th>Perfil</th><th>Situação</th><th>Último acesso</th><th>Criada</th><th>Ações</th></tr></thead>
+    <tbody>
+    {% for pessoa, credencial in contas %}
+      <tr>
+        <td>{{ pessoa.nome }}{% if pessoa.id == usuario.id %} <span class="sutil">(você)</span>{% endif %}</td>
+        <td class="mono">{{ credencial.login if credencial else '—' }}</td>
+        <td>
+          {% if credencial %}
+          <form method="post" action="/usuarios/{{ pessoa.id }}/alterar" class="em-linha">
+            <select name="perfil" aria-label="Perfil de {{ pessoa.nome }}" onchange="this.form.requestSubmit()">
+              {% for p in perfis %}<option value="{{ p }}" {{ 'selected' if pessoa.perfil == p }}>{{ p|capitalize }}</option>{% endfor %}
+            </select>
+          </form>
+          {% else %}<span class="sutil">{{ pessoa.perfil|capitalize }}</span>{% endif %}
+        </td>
+        <td>
+          {% if not credencial %}<span class="selo">sem login</span>
+          {% elif not credencial.ativo %}<span class="selo">desativada</span>
+          {% elif credencial.bloqueado_ate and credencial.bloqueado_ate > agora %}<span class="selo atencao">bloqueada até {{ credencial.bloqueado_ate.strftime('%H:%M') }}</span>
+          {% elif credencial.trocar_senha %}<span class="selo atencao">senha provisória</span>
+          {% else %}<span class="selo ok">ativa</span>{% endif %}
+        </td>
+        <td class="pequeno">{{ credencial.ultimo_acesso|datahora if credencial and credencial.ultimo_acesso else '—' }}</td>
+        <td class="pequeno">{% if credencial %}{{ credencial.criado_em|datahora }}{% if credencial.criado_por %} · {{ credencial.criado_por }}{% endif %}{% else %}—{% endif %}</td>
+        <td class="acoes">
+          {% if credencial %}
+          <form method="post" action="/usuarios/{{ pessoa.id }}/senha" class="em-linha"><button class="pequeno" type="submit">Redefinir senha</button></form>
+          <form method="post" action="/usuarios/{{ pessoa.id }}/alterar" class="em-linha">
+            <input type="hidden" name="ativo" value="{{ '0' if credencial.ativo else '1' }}">
+            <button class="pequeno discreto" type="submit">{{ 'Desativar' if credencial.ativo else 'Reativar' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="bloco" style="max-width: 760px">
+  <h2>Nova conta</h2>
+  <form method="post" action="/usuarios" class="nova-conta">
+    <div class="campo"><label for="nc-nome">Nome completo</label><input id="nc-nome" name="nome" required list="sem-login" autocomplete="off"></div>
+    <datalist id="sem-login">{% for pessoa, credencial in contas if not credencial %}<option value="{{ pessoa.nome }}">{% endfor %}</datalist>
+    <div class="campo"><label for="nc-login">Login</label><input id="nc-login" name="login" required pattern="[a-z0-9][a-z0-9._\-]{2,59}" placeholder="ex.: maria.souza" autocapitalize="none" spellcheck="false" autocomplete="off"></div>
+    <div class="campo"><label for="nc-perfil">Perfil</label><select id="nc-perfil" name="perfil">{% for p in perfis %}<option value="{{ p }}">{{ p|capitalize }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="nc-senha">Senha inicial</label>
+      <span class="com-botao"><input id="nc-senha" name="senha" required minlength="{{ minimo }}" value="{{ sugestao }}" class="mono" autocomplete="off" spellcheck="false">
+      <button class="pequeno" type="button" id="nc-gerar">Gerar outra</button></span></div>
+    <label class="chave"><input type="checkbox" name="trocar_senha" value="1" checked> Exigir troca da senha no primeiro acesso</label>
+    <div><button class="primario" type="submit">Criar conta</button></div>
+  </form>
+  <dl class="perfis sutil">
+    {% for p in perfis %}<dt>{{ p|capitalize }}</dt><dd>{{ descricao_perfil[p] }}</dd>{% endfor %}
+  </dl>
+</section>
+<script>
+(function () {
+  var alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#%+=!?";
+  function gerar() {
+    var valores = new Uint32Array(20), s = "";
+    crypto.getRandomValues(valores);
+    for (var i = 0; i < valores.length; i++) s += alfabeto[valores[i] % alfabeto.length];
+    if (!/[A-Z]/.test(s) || !/[a-z]/.test(s) || !/[0-9]/.test(s) || !/^[A-Za-z0-9].*[A-Za-z0-9]$/.test(s)) return gerar();
+    return s;
+  }
+  var botao = document.getElementById("nc-gerar");
+  if (botao) botao.addEventListener("click", function () { document.getElementById("nc-senha").value = gerar(); });
+  document.querySelectorAll("[data-copiar]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var texto = document.getElementById(b.dataset.copiar).textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(texto).then(function () { b.textContent = "Copiada"; });
+    });
+  });
+})();
+</script>
+{% endblock %}

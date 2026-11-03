@@ -367,3 +367,18 @@ tr.linha-composicao > td { background: var(--superficie-2); padding: 10px 12px; 
 .ac-tag { font-size: 10.5px; padding: 0 5px; border-radius: 999px; background: var(--superficie-2); color: var(--texto-2); font-weight: 600; }
 .ac-dica { display: block; font-size: 11.5px; color: var(--acento); min-height: 0; margin-top: 2px; }
 .ac-dica:empty { display: none; }
+
+/* Contas de acesso */
+form.em-linha { display: inline; margin: 0; }
+.usuarios td.acoes { white-space: nowrap; }
+.usuarios td.acoes form + form { margin-left: 4px; }
+.nova-conta { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; align-items: end; margin-bottom: 12px; }
+.nova-conta .com-botao { display: flex; gap: 6px; }
+.nova-conta .com-botao input { flex: 1; min-width: 0; }
+dl.perfis { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; font-size: 12.5px; }
+dl.perfis dt { font-weight: 600; color: var(--texto-2); }
+dl.perfis dd { margin: 0; }
+.senha-gerada { border-color: var(--acento); }
+.senha-gerada .mono { font-size: 15px; user-select: all; }
+.usuario a { color: var(--texto-2); font-size: 12px; }
+.quadro-contas { height: auto; max-height: none; min-height: 0; }

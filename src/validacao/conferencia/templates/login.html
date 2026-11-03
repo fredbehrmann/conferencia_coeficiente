@@ -2,14 +2,15 @@
 {% block titulo %}Entrar{% endblock %}
 {% block conteudo %}
 <div class="bloco" style="max-width: 420px; margin: 40px auto">
-  <h2>Identifique-se</h2>
-  <p class="sutil">O nome fica registrado em cada decisão.{% if not pede_senha %} Não há senha: a aplicação roda apenas neste computador.{% endif %}</p>
+  <h2>Entrar</h2>
+  <p class="sutil">Acesso restrito a contas cadastradas pelo administrador. Seu nome fica registrado em cada decisão.</p>
+  {% if credencial_demo %}<p class="aviso">Demonstração (dados fictícios): login <b class="mono">{{ credencial_demo[0] }}</b>, senha <b class="mono">{{ credencial_demo[1] }}</b>.</p>{% endif %}
   <form method="post" action="/login">
     <input type="hidden" name="volta" value="{{ volta }}">
-    <div class="campo" style="margin-bottom: 10px"><label for="nome">Nome</label><input id="nome" name="nome" required autofocus></div>
-    {% if pede_senha %}<div class="campo" style="margin-bottom: 10px"><label for="senha">Senha de acesso</label><input id="senha" name="senha" type="password" required autocomplete="current-password"></div>{% endif %}
-    <div class="campo" style="margin-bottom: 14px"><label for="perfil">Perfil</label><select id="perfil" name="perfil">{% for p in perfis %}<option value="{{ p }}">{{ p|capitalize }}</option>{% endfor %}</select></div>
+    <div class="campo" style="margin-bottom: 10px"><label for="login">Login</label><input id="login" name="login" value="{{ login or '' }}" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+    <div class="campo" style="margin-bottom: 14px"><label for="senha">Senha</label><input id="senha" name="senha" type="password" required autocomplete="current-password"></div>
     <button class="primario" type="submit">Entrar</button>
   </form>
+  <p class="sutil" style="margin-top: 12px; margin-bottom: 0">Esqueceu a senha? Peça ao administrador para redefini-la.</p>
 </div>
 {% endblock %}

@@ -214,6 +214,34 @@ Melhorias do diagnóstico de performance (novembro de 2026):
 | `python -m validacao arquivar-v1 --confirmar` | Copia as tabelas da versão 1 para `arquivo_v1_<data>.sqlite` e as esvazia (libera ~130 MB) |
 | `python -m validacao copia-nuvem [--forcar]` | Grava agora a cópia compactada na pasta do OneDrive |
 
+## Controle de acesso
+
+Só entra quem tem conta: login e senha individuais. A senha é guardada apenas como hash (scrypt com sal);
+nem o administrador consegue lê-la depois. O nome da conta é o que assina as decisões.
+
+- **Primeira subida:** a aplicação cria a conta `admin` (perfil Administrador) com a senha inicial entregue ao
+  responsável, ou com `CONFERENCIA_ADMIN_SENHA`, se definida. Troque-a em **Minha senha** (canto superior direito).
+- **Novas contas:** aba **Usuários** (só administradores). Informe nome, login, perfil e a senha inicial
+  (já vem uma sugestão forte). A senha aparece uma única vez na tela; por padrão a pessoa é obrigada a trocá-la
+  no primeiro acesso. Pessoas que já assinavam decisões antes do controle de acesso aparecem como "sem login":
+  crie a conta com o mesmo nome para ligar o histórico.
+- **Esqueceu a senha:** o administrador clica em **Redefinir senha** e entrega a provisória. Desativar uma conta
+  encerra na hora as sessões abertas dela.
+- **Regras:** senha com 12 caracteres ou mais e três tipos entre minúsculas, maiúsculas, números e símbolos;
+  5 tentativas erradas bloqueiam a conta por 15 minutos; a sessão expira em 12 horas. Sempre fica ao menos um
+  administrador ativo.
+
+Pela linha de comando (também serve para recuperar o `admin`):
+
+| Comando | O que faz |
+|---|---|
+| `python -m validacao usuario listar` | Lista as contas |
+| `python -m validacao usuario criar maria.souza --nome "Maria Souza" --perfil ANALISTA` | Cria a conta e mostra a senha provisória |
+| `python -m validacao usuario senha admin` | Gera uma senha provisória nova (desbloqueia e reativa a conta) |
+| `python -m validacao usuario desativar maria.souza` | Desativa (`ativar` reativa) |
+
+No Docker, prefixe com `docker compose exec conferencia`.
+
 ## Servidor com Docker
 
 A imagem roda só a aplicação web; o banco e as bases ficam em pastas do servidor montadas como volumes.
@@ -226,9 +254,9 @@ servidor/
 │   └── bases/                 ← pacote do SICONFI (base_validacao_coeficiente.csv, rreo_…, msc_…, cobertura.csv, status.csv)
 ```
 
-1. **Configuração.** `cp env.exemplo .env` e preencha `CONFERENCIA_SENHA` (senha compartilhada pedida na
-   tela de entrada) e `CONFERENCIA_SEGREDO` (`python3 -c "import secrets; print(secrets.token_hex(32))"`).
-   A tela de entrada só pede nome e perfil; **sem a senha, qualquer pessoa que alcance o endereço entra.**
+1. **Configuração.** `cp env.exemplo .env` e preencha `CONFERENCIA_SEGREDO`
+   (`python3 -c "import secrets; print(secrets.token_hex(32))"`). As contas de acesso ficam no próprio banco
+   (ver "Controle de acesso"); ao levar o banco do computador local, as contas vão junto.
 2. **Banco.** Pare a aplicação no computador local e copie de `%LOCALAPPDATA%\ConferenciaCoeficiente` os
    arquivos `validacao.sqlite` e `detalhes_siconfi.sqlite` para `dados/` (use `python -m validacao backup` antes,
    para não perder gravações pendentes do WAL). Sem banco, a aplicação cria um vazio.
@@ -258,6 +286,24 @@ docker compose exec conferencia python -m validacao backup
 docker compose exec conferencia python -m validacao manutencao
 docker compose exec conferencia python -m validacao validar
 ```
+
+### Publicar na Railway
+
+O `railway.toml` já indica o Dockerfile e a verificação de saúde (`/saude`). No projeto da Railway:
+
+1. **Volume:** no serviço, *Add Volume* com ponto de montagem **`/dados`** (banco, contas, cópias e tarefas).
+   Sem volume, tudo se perde a cada deploy. O contêiner acerta sozinho o dono do volume (montado como root).
+2. **Variáveis** (*Variables*):
+   - `CONFERENCIA_SEGREDO` = resultado de `python -c "import secrets; print(secrets.token_hex(32))"`
+   - `CONFERENCIA_COOKIE_SEGURO=1` (a Railway serve por HTTPS)
+   - `CONFERENCIA_PROXIES=*` (o proxy da Railway não tem IP fixo)
+   - `CONFERENCIA_BASES=/dados/bases` (a Railway permite um volume por serviço)
+   - opcional: `CONFERENCIA_ADMIN_SENHA`, para a conta `admin` de um banco novo
+   A porta vem da variável `PORT`, que a própria Railway define.
+3. **Endereço:** *Settings → Networking → Generate Domain*.
+
+O volume começa vazio: a aplicação sobe com um banco novo e a conta `admin`. Para usar o banco atual, copie
+`validacao.sqlite` e `detalhes_siconfi.sqlite` para `/dados` com a aplicação parada.
 
 Observações: use **um único contêiner e um único processo** (SQLite com um gravador; as tarefas pesadas já
 rodam em processo separado). A cópia compactada para o OneDrive fica desligada no servidor

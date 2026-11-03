@@ -269,6 +269,24 @@ class DecisaoCaso(Base):
     decisao_legada_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class Acesso(Base):
+    """Credencial de acesso de uma pessoa (tabela `usuario`). Só o hash da senha é guardado."""
+
+    __tablename__ = "cf_acesso"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuario.id"), primary_key=True)
+    login: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
+    senha_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    trocar_senha: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    falhas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bloqueado_ate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    versao_sessao: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    criado_por: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    ultimo_acesso: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Configuracao(Base):
     __tablename__ = "cf_configuracao"
 

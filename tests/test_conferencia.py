@@ -37,6 +37,29 @@ def demo(tmp_path_factory):
     return destino, relatorio
 
 
+SENHA_TESTE = "Xq7!mR2#vL9pK4wz"
+
+
+def _entrar(cliente, destino, nome, perfil="ANALISTA", volta="/"):
+    """Cria (se preciso) a conta de teste da pessoa e entra com ela."""
+    from validacao.conferencia import acesso as contas
+    from validacao.modelos import Usuario
+
+    from validacao.db import sem_acento
+
+    login = "t." + re.sub(r"[^a-z0-9]+", ".", sem_acento(nome)).strip(".")
+    engine = criar_engine(destino)
+    with Session(engine) as session:
+        if session.scalar(select(cf.Acesso).where(cf.Acesso.login == login)) is None:
+            contas.criar_conta(session, login, nome, perfil, SENHA_TESTE, criado_por="teste", trocar_senha=False)
+        else:
+            pessoa = session.scalar(select(Usuario).where(Usuario.nome == nome))
+            pessoa.perfil = perfil
+            session.commit()
+    engine.dispose()
+    return cliente.post("/login", data={"login": login, "senha": SENHA_TESTE, "volta": volta})
+
+
 def _caso(destino, ente, ano=2023):
     engine = criar_engine(destino)
     session = Session(engine)
@@ -200,7 +223,7 @@ def test_cenario_8_decisao_persistente(demo, tmp_path):
     destino, _ = demo
     app = criar_app(destino)
     with TestClient(app) as cliente:
-        cliente.post("/login", data={"nome": "Teste", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Teste", "ANALISTA", "/")
         session, caso = _caso(destino, 9900103)
         session.close()
         resposta = cliente.post(f"/caso/{caso.id}/decidir", data={"acao": "ADOTAR_FONTE", "justificativa": ""})
@@ -215,7 +238,7 @@ def test_cenario_8_decisao_persistente(demo, tmp_path):
     # "recarregar a aplicação": nova instância, nova conexão
     app2 = criar_app(destino)
     with TestClient(app2) as cliente:
-        cliente.post("/login", data={"nome": "Outra pessoa", "perfil": "REVISOR", "volta": "/"})
+        _entrar(cliente, destino, "Outra pessoa", "REVISOR", "/")
         pagina = cliente.get(f"/caso/{caso.id}?parcial=1").text
         assert "DCA declarou zero por erro de preenchimento" in pagina
         assert "Teste" in pagina and "Valor ajustado" in pagina
@@ -251,7 +274,7 @@ def test_interface_central_filtros_e_exportacao(demo):
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
         assert cliente.get("/", follow_redirects=False).status_code == 303
-        cliente.post("/login", data={"nome": "Leitor", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Leitor", "ANALISTA", "/")
         pagina = cliente.get("/").text
         assert "DADOS FICTÍCIOS" in pagina
         assert "Fictício C" in pagina and "Fictício G" not in pagina  # somente casos com alerta
@@ -273,7 +296,7 @@ def test_importacao_pela_tela_com_previa_e_erros(demo):
     destino, _ = demo
     conteudo = "codigo;exercicio;valor declarado\n9900107;2024;1.234.567,89\n1234567;2024;10\n9900108;2024;abc\n9900108;2024;5\n".encode("utf-8")
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Importador", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Importador", "ANALISTA", "/")
         tela = cliente.post("/importar/arquivo", files={"arquivo": ("balanco_teste.csv", conteudo, "text/csv")}).text
         token = re.search(r'name="token" value="([0-9a-f]+)"', tela).group(1)
         assert "valor declarado" in tela
@@ -418,7 +441,7 @@ def test_df_vira_componentes_proprios(tmp_path):
 def test_paineis_visao_e_recuperacao(demo):
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Gestor", "perfil": "ANALISTA", "volta": "/visao"})
+        _entrar(cliente, destino, "Gestor", "ANALISTA", "/visao")
         visao = cliente.get("/visao").text
         assert "Visão geral da base de referência" in visao and "Cota-parte do ICMS" in visao
         assert "Concordância das fontes" in visao
@@ -447,7 +470,7 @@ def test_dados_dos_alertas_no_painel_do_caso(demo):
         assert {"DSI", "AUS", "VAR"} <= regras
         caso_id = next(a.caso_id for a in alertas if a.regra == "DSI")
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         painel = cliente.get(f"/caso/{caso_id}?parcial=1").text
         assert "Ver os dados que geraram o alerta" in painel and "Valor usado na comparação" in painel
 
@@ -488,7 +511,7 @@ def test_tela_de_importacao_mostra_etapas_conferencia_e_filtro(demo):
     assert "conferem, linha a linha" in textos and "confere com valor_msc" in textos
     assert any("falharam" in t for t in [t for _n, t in diagnostico["observacoes"]])  # ente C, MSC 2023
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         pagina = cliente.get("/importar").text
         assert "O que entrou no sistema" in pagina and "Conferência dos arquivos" in pagina
         assert "Importado e validado" in pagina
@@ -502,7 +525,7 @@ def test_tela_de_importacao_mostra_etapas_conferencia_e_filtro(demo):
 def test_central_mostra_coluna_dca_antes_do_rreo(demo):
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         html = cliente.get("/").text
         cabecalhos = re.findall(r'<th class="num"[^>]*>([^<]+)</th>', html)
         assert cabecalhos[:4] == ["Principal", "DCA", "RREO", "MSC"]
@@ -565,7 +588,7 @@ def test_coluna_analise_na_central_e_atualizacao_de_banco_antigo(demo, tmp_path)
 
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         html = cliente.get("/?enviado=1&somente_alerta=").text
         assert ">Análise</th>" in html and 'class="confianca c' in html
         baixos = cliente.get("/?enviado=1&somente_alerta=&confianca=ate2&ordem=confianca").text
@@ -589,7 +612,7 @@ def test_coluna_analise_na_central_e_atualizacao_de_banco_antigo(demo, tmp_path)
 def test_coluna_dca_continua_apos_aplicar_filtros(demo):
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         html = cliente.get("/").text
         assert 'name="col" value="SICONFI_DCA" checked' in html
 
@@ -616,7 +639,7 @@ def test_composicao_do_valor_por_fonte():
 def test_autocompletar_de_entes(demo):
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         por_nome = cliente.get("/api/entes?q=ficticio a").json()
         assert por_nome and por_nome[0]["id"] == 9900101  # sem acento e sem diferença de maiúsculas
         por_codigo = cliente.get("/api/entes?q=990010").json()
@@ -647,7 +670,7 @@ def test_tarefas_em_processo_separado(demo, tmp_path):
     banco = tmp_path / "tarefas.sqlite"
     copiar_sqlite(destino, banco)
     with TestClient(criar_app(banco)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         antes = Session(criar_engine(banco)).scalar(select(func.max(cf.Execucao.id)))
         resposta = cliente.post("/validar").json()
         assert resposta["ok"]
@@ -672,7 +695,7 @@ def test_cache_dos_paineis_muda_com_decisao(demo, tmp_path):
     banco = tmp_path / "cache.sqlite"
     copiar_sqlite(destino, banco)
     with TestClient(criar_app(banco)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         primeira = cliente.get("/visao").text
         assert cliente.get("/visao").text == primeira  # segunda visita vem do cache
         engine = criar_engine(banco)
@@ -688,7 +711,7 @@ def test_cache_dos_paineis_muda_com_decisao(demo, tmp_path):
 def test_busca_de_ente_sem_acento_e_dados_brutos(demo):
     destino, _ = demo
     with TestClient(criar_app(destino)) as cliente:
-        cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "volta": "/"})
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         assert "Fictício A" in cliente.get("/?enviado=1&somente_alerta=&q=ficticio a").text
         pagina = cliente.get("/dados?componente=ISS_MUN&q=ficticio").text
         assert "Fictício" in pagina
@@ -724,14 +747,91 @@ def test_banco_copiado_para_pasta_local(tmp_path, monkeypatch):
     assert not db.em_pasta_sincronizada(local / "x.sqlite")
 
 
-def test_saude_e_senha_de_acesso(demo, monkeypatch):
+def test_controle_de_acesso(demo, monkeypatch):
+    from validacao.conferencia import acesso as contas
+
     destino, _ = demo
-    monkeypatch.setenv("CONFERENCIA_SENHA", "segredo-de-teste")
     with TestClient(criar_app(destino)) as cliente:
         assert cliente.get("/saude").json() == {"ok": True}
+        # sem login, nenhum dado: telas redirecionam e o estado das tarefas é recusado
+        for rota in ("/", "/visao", "/dados", "/resultado", "/usuarios", "/api/entes?q=a"):
+            assert cliente.get(rota, follow_redirects=False).status_code in (303, 307), rota
+        assert cliente.get("/validar/estado").status_code == 401
         assert 'name="senha"' in cliente.get("/login").text
-        errado = cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "senha": "x", "volta": "/"})
-        assert errado.status_code == 401
-        assert cliente.get("/visao", follow_redirects=False).status_code in (303, 307)
-        certo = cliente.post("/login", data={"nome": "Analista", "perfil": "ANALISTA", "senha": "segredo-de-teste", "volta": "/"})
-        assert certo.status_code == 200 and "Central" in certo.text
+        assert cliente.post("/login", data={"login": "nao.existe", "senha": "x"}).status_code == 401
+        # a conta admin nasce com a senha inicial (hash no código) e só o administrador vê Usuários
+        with Session(criar_engine(destino)) as session:
+            admin = session.scalar(select(cf.Acesso).where(cf.Acesso.login == "admin"))
+            assert admin is not None and admin.senha_hash == contas.HASH_ADMIN_INICIAL
+        _entrar(cliente, destino, "Analista", "ANALISTA", "/")
+        assert cliente.get("/usuarios").status_code == 403
+        assert "/usuarios" not in cliente.get("/visao").text
+        cliente.post("/sair")
+        _entrar(cliente, destino, "Chefe", "ADMINISTRADOR", "/")
+        pagina = cliente.get("/usuarios").text
+        assert "Contas de acesso" in pagina and "t.analista" in pagina and "admin" in pagina
+        # senha fraca recusada; conta nova com troca obrigatória
+        fraca = cliente.post("/usuarios", data={"login": "maria.souza", "nome": "Maria Souza", "perfil": "ANALISTA",
+                                                 "senha": "curta", "trocar_senha": "1"})
+        assert "pelo menos 12" in fraca.text
+        provisoria = "Prov1s0ria!Forte"
+        criada = cliente.post("/usuarios", data={"login": "Maria.Souza", "nome": "Maria Souza", "perfil": "REVISOR",
+                                                  "senha": provisoria, "trocar_senha": "1"})
+        assert "maria.souza" in criada.text and provisoria in criada.text
+        assert provisoria not in cliente.get("/usuarios").text  # a senha aparece uma vez só
+        with Session(criar_engine(destino)) as session:
+            maria = session.scalar(select(cf.Acesso).where(cf.Acesso.login == "maria.souza"))
+            assert provisoria not in maria.senha_hash and contas.conferir_senha(provisoria, maria.senha_hash)
+            maria_id = maria.usuario_id
+    with TestClient(criar_app(destino)) as maria:
+        resposta = maria.post("/login", data={"login": "maria.souza", "senha": provisoria, "volta": "/visao"})
+        assert resposta.url.path == "/minha-senha"
+        assert maria.get("/visao", follow_redirects=False).headers["location"] == "/minha-senha"
+        assert maria.post("/minha-senha", data={"atual": provisoria, "nova": "Outra#Senha2026x",
+                                                "confirmacao": "Outra#Senha2026y"}).status_code == 400
+        trocou = maria.post("/minha-senha", data={"atual": provisoria, "nova": "Outra#Senha2026x",
+                                                  "confirmacao": "Outra#Senha2026x"})
+        assert trocou.url.path == "/visao" and "Senha alterada" in trocou.text
+        # desativada pelo administrador: a sessão aberta cai na hora
+        with Session(criar_engine(destino)) as session:
+            chefe = session.scalar(select(cf.Acesso).where(cf.Acesso.login == "t.chefe"))
+            contas.alterar_conta(session, maria_id, chefe.usuario_id, ativo=False)
+        assert maria.get("/visao", follow_redirects=False).status_code == 303
+        recusa = maria.post("/login", data={"login": "maria.souza", "senha": "Outra#Senha2026x"})
+        assert recusa.status_code == 401 and "desativada" in recusa.text
+    # bloqueio após 5 tentativas
+    with Session(criar_engine(destino)) as session:
+        contas.alterar_conta(session, maria_id, 0, ativo=True)
+    with TestClient(criar_app(destino)) as cliente:
+        for _ in range(5):
+            cliente.post("/login", data={"login": "maria.souza", "senha": "errada"})
+        bloqueada = cliente.post("/login", data={"login": "maria.souza", "senha": "Outra#Senha2026x"})
+        assert bloqueada.status_code == 401 and "bloqueada" in bloqueada.text
+    # o último administrador não pode ser rebaixado nem desativado
+    from validacao.modelos import Usuario
+
+    with Session(criar_engine(destino)) as session:
+        admins = [a for a in session.scalars(select(cf.Acesso)).all()
+                  if session.get(Usuario, a.usuario_id).perfil == "ADMINISTRADOR"]
+        for a in admins[1:]:
+            contas.alterar_conta(session, a.usuario_id, 0, ativo=False)
+        with pytest.raises(contas.AcessoRecusado):
+            contas.alterar_conta(session, admins[0].usuario_id, 0, perfil="ANALISTA")
+        with pytest.raises(contas.AcessoRecusado):
+            contas.alterar_conta(session, admins[0].usuario_id, 0, ativo=False)
+        for a in admins[1:]:
+            contas.alterar_conta(session, a.usuario_id, 0, ativo=True)
+
+def test_senhas():
+    from validacao.conferencia import acesso as contas
+
+    guardado = contas.gerar_hash("Abc-123-def-456")
+    assert guardado.startswith("scrypt$") and "Abc-123" not in guardado
+    assert contas.conferir_senha("Abc-123-def-456", guardado) and not contas.conferir_senha("Abc-123-def-457", guardado)
+    assert contas.gerar_hash("Abc-123-def-456") != guardado  # sal aleatório
+    assert contas.problema_da_senha("curta1!")
+    assert contas.problema_da_senha("somenteminusculasaqui")
+    assert contas.problema_da_senha("Maria-Souza-2026", nome="Maria Souza")
+    assert contas.problema_da_senha("Xq7!mR2#vL9pK4wz") is None
+    gerada = contas.gerar_senha()
+    assert len(gerada) == 20 and contas.problema_da_senha(gerada) is None

@@ -23,17 +23,21 @@ RUN pip install -r requirements.txt
 
 COPY src/ ./src/
 COPY fontes/ ./fontes/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN useradd --create-home --uid 1000 conferencia \
  && mkdir -p /dados /bases \
- && chown -R conferencia:conferencia /dados /bases /app
+ && chown -R conferencia:conferencia /dados /bases /app \
+ && chmod 755 /usr/local/bin/docker-entrypoint.sh
 
-USER conferencia
+# Sem a instrução de volume do Docker: a Railway não a aceita ("use Railway Volumes"). A persistência vem do volume montado
+# em /dados pelo docker-compose ou pela Railway. O processo começa como root só para acertar o dono do
+# volume (a Railway monta os volumes como root) e passa a rodar como "conferencia" (uid 1000).
 WORKDIR /app/src
-VOLUME ["/dados"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
-  CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"CONFERENCIA_PORTA\", \"8000\")}/saude', timeout=4)" || exit 1
+  CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\") or os.environ.get(\"CONFERENCIA_PORTA\", \"8000\")}/saude', timeout=4)" || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["python", "-m", "validacao", "servir"]
