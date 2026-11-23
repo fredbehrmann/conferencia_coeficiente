@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from validacao.conferencia import importacao
+from validacao.conferencia import importacao, simulacao
 from validacao.conferencia import modelos as cf
 from validacao.conferencia.comparacao import RegistroV, comparar, montar_fonte
 from validacao.conferencia.consultas import caso_por_chave
@@ -291,6 +291,273 @@ def test_interface_central_filtros_e_exportacao(demo):
         assert "não" in pacote.read("registros.csv").decode("utf-8-sig")  # versão 1 não vigente presente
         for rota in ("/resultado", "/importar", "/dados", "/cobertura", "/regras", "/fontes"):
             assert cliente.get(rota).status_code == 200, rota
+
+
+def test_simulador_compara_modelos_sem_gravar_decisoes(demo):
+    destino, _ = demo
+    engine = criar_engine(destino)
+    with Session(engine) as session:
+        decisoes_antes = session.scalar(select(func.count()).select_from(cf.DecisaoCaso))
+        dados = simulacao.simular(session)
+        decisoes_depois = session.scalar(select(func.count()).select_from(cf.DecisaoCaso))
+    engine.dispose()
+    assert decisoes_depois == decisoes_antes
+    assert dados["execucao"] is not None and dados["resumo"]["casos"] > 0
+    por_chave = {(l["caso"].id_ente, l["caso"].exercicio): l for l in dados["linhas"] if l["caso"].componente == "ISS_MUN"}
+    ausente = por_chave[(9900102, 2023)]
+    assert ausente["degraus"]["regra"] == "D2A" and ausente["degraus"]["valor_proposto"] is not None
+    assert ausente["evidencia"]["regra"].startswith("E2")
+    zero = por_chave[(9900103, 2023)]
+    assert zero["degraus"]["valor_proposto"] == 300_000_000
+    assert zero["evidencia"]["valor_proposto"] == 300_000_000
+    assert "total_evidencia_potencial" in dados["resumo"]
+    assert all("valor_aprovado" in l["evidencia"] for l in dados["linhas"])
+    assert dados["resumo"]["automaticas_degraus"] + dados["resumo"]["pendentes_degraus"] == dados["resumo"]["casos"]
+    csv = simulacao.exportar_csv(dados, simulacao.FiltrosSimulador(diferenca=""))
+    assert csv.startswith(b"\xef\xbb\xbf") and b"degraus_valor" in csv and b"evidencia_valor" in csv
+
+
+def _entrada_modelo2(valores, *, capital=False, esfera="MUNICIPIO", tipos=()):
+    return simulacao.EntradaCaso(
+        id=1, id_ente=9900999, nome_ente="Caso calibrado", uf="BA", esfera=esfera, capital=capital,
+        exercicio=2023, componente="ISS_MUN", situacao_exercicio="EXIGIVEL", diagnostico="ALERTA",
+        principal="SICONFI_DCA", valor_principal=valores["SICONFI_DCA"]["original"],
+        estado_principal="VALOR", confianca=2, confianca_motivo="", tipos=set(tipos),
+        maior_dif_abs=0, valores=valores,
+    )
+
+
+def _contexto(**campos):
+    return simulacao.ContextoEvidencia(**campos)
+
+
+def test_modelo2_pesos_de_independencia():
+    assert simulacao.peso_evidencia(["SIOPE", "SIOPS"]) == 1.25  # mesmo declarante: não valem duas fontes
+    assert simulacao.peso_evidencia(["SIOPE"]) == 0.75
+    assert simulacao.peso_evidencia(["SIOPE", "SIOPS", "TCE", "SICONFI_RREO", "SICONFI_MSC"]) == 3.0
+    so_autodeclaradas = simulacao.aplicar_evidencia(_entrada_modelo2({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000),
+    }))
+    assert so_autodeclaradas["regra"] == "E1B" and so_autodeclaradas["status"] == "AUTOMATICA"
+    assert so_autodeclaradas["peso_dca"] == 1.25
+    com_tce = simulacao.aplicar_evidencia(_entrada_modelo2({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000),
+        "TCE": _v(100_000_000),
+    }))
+    assert com_tce["regra"] == "E1A" and com_tce["peso_dca"] == 2.25
+
+
+def test_modelo2_alerta_externo_nao_bloqueia_evidencia_forte():
+    valores = {
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"),
+        "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000), "TCE": _v(100_000_000),
+        "SICONFI_RREO": _v(90_000_000, alertas=("TOT",)),
+    }
+    resultado = simulacao.aplicar_evidencia(_entrada_modelo2(valores, tipos=("TOT",)))
+    assert resultado["regra"] == "E1A" and resultado["status"] == "AUTOMATICA"
+
+
+def test_modelo2_alerta_forte_na_dca_continua_pendente():
+    valores = {
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA", alertas=("ESC",)),
+        "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000), "TCE": _v(100_000_000),
+    }
+    resultado = simulacao.aplicar_evidencia(_entrada_modelo2(valores, tipos=("ESC",)))
+    assert resultado["regra"] == "E1A" and resultado["status"] == "PENDENTE"
+
+
+def test_modelo2_evidencia_forte_troca_e_materialidade_pede_visto():
+    base = {"SICONFI_DCA": _v(100_000_000, "REFERENCIA")}
+    forte = {**base, "SIOPE": _v(50_000_000), "SIOPS": _v(50_100_000), "TCE": _v(50_000_000)}
+    sem_porte = simulacao.aplicar_evidencia(_entrada_modelo2(forte))
+    assert sem_porte["regra"] == "E2D" and sem_porte["status"] == "AUTOMATICA"  # diferença de 50%, evidência 2,25
+    assert sem_porte["valor_proposto"] == 50_000_000 and "nunca média sintética" in sem_porte["formula"]
+    contexto = _contexto(receita_media_ente={9900999: 50_000_000}, anos_componente={"ISS_MUN": 7},
+                         total_nacional=10**14)
+    material = simulacao.aplicar_evidencia(_entrada_modelo2(forte), contexto)
+    assert material["status"] == "VISTO" and material["valor_aprovado"] == 100_000_000  # fora do cenário aprovado
+    assert any("receita média do ente" in m for m in material["motivos_visto"])
+    # diferença pequena só com SIOPE e SIOPS contra (1,25 < 2,0): prevalece a DCA
+    fraca = simulacao.aplicar_evidencia(_entrada_modelo2({**base, "SIOPE": _v(92_000_000), "SIOPS": _v(92_500_000)}))
+    assert fraca["regra"] == "E1D" and fraca["status"] == "AUTOMATICA" and fraca["valor_proposto"] == 100_000_000
+    # diferença grande com evidência só moderada: revisão
+    moderada = simulacao.aplicar_evidencia(_entrada_modelo2({**base, "SIOPE": _v(50_000_000), "SIOPS": _v(50_100_000),
+                                                             "SICONFI_MSC": _v(100_000_000)}))
+    assert moderada["regra"] == "E4" and moderada["status"] == "PENDENTE"
+
+
+def test_modelo2_icms_estadual_exige_rreo_e_troca_exige_visto():
+    iguais = {"SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000)}
+    sem_rreo = simulacao.aplicar_evidencia(_entrada_modelo2(iguais, esfera="ESTADO"))
+    assert sem_rreo["status"] == "PENDENTE" and "exige também o RREO" in sem_rreo["justificativa"]
+    com_rreo = simulacao.aplicar_evidencia(_entrada_modelo2({**iguais, "SICONFI_RREO": _v(100_000_000)}, esfera="ESTADO"))
+    assert com_rreo["status"] == "AUTOMATICA"
+    troca = simulacao.aplicar_evidencia(_entrada_modelo2({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(70_000_000), "SIOPS": _v(70_000_000),
+        "SICONFI_RREO": _v(70_000_000),
+    }, esfera="ESTADO"))
+    assert troca["regra"] == "E2D" and troca["status"] == "VISTO" and "Estado/DF" in troca["motivos_visto"]
+
+
+def test_modelo2_teste_temporal_nao_e_anulado_por_confirmacoes():
+    valores = {"SICONFI_DCA": _v(4_000_000_000, "REFERENCIA"), "SIOPE": _v(4_000_000_000), "SIOPS": _v(4_000_000_000),
+               "TCE": _v(4_000_000_000), "SICONFI_RREO": _v(4_000_000_000)}
+    contexto = _contexto(serie_dca={(9900999, "ISS_MUN"): {2022: 30_000_000, 2023: 4_000_000_000, 2024: 32_000_000}})
+    resultado = simulacao.aplicar_evidencia(_entrada_modelo2(valores), contexto)
+    assert resultado["regra"] == "E1A" and resultado["status"] == "PENDENTE" and "pico isolado" in resultado["justificativa"]
+    sem_salto = simulacao.aplicar_evidencia(_entrada_modelo2(valores), _contexto(
+        serie_dca={(9900999, "ISS_MUN"): {2022: 3_800_000_000, 2023: 4_000_000_000}}))
+    assert sem_salto["status"] == "AUTOMATICA"
+
+
+def test_modelo2_valor_identico_confirmado_em_dois_entes_e_copia():
+    valores = {"SICONFI_DCA": _v(532_677_206, "REFERENCIA"), "SIOPE": _v(532_677_206), "SIOPS": _v(532_677_206),
+               "TCE": _v(532_677_206)}
+    linhas = []
+    for id_ente in (1200054, 1200252):
+        caso = _entrada_modelo2(valores)
+        caso.id_ente = id_ente
+        linhas.append({"caso": caso, "evidencia": simulacao.aplicar_evidencia(caso)})
+    assert all(l["evidencia"]["status"] == "AUTOMATICA" for l in linhas)
+    assert simulacao.aplicar_copias(linhas) == 2
+    assert all(l["evidencia"]["status"] == "PENDENTE" and l["evidencia"]["regra"].endswith("+CPY") for l in linhas)
+
+
+def test_modelo2_rreo_desempata_perfil_d():
+    resultado = simulacao.aplicar_evidencia(_entrada_modelo2({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPS": _v(100_000_000), "SICONFI_RREO": _v(100_000_000),
+        "SICONFI_MSC": _v(100_000_000), "SIOPE": _v(70_000_000),
+    }))
+    assert resultado["regra"] == "E1B" and resultado["status"] == "AUTOMATICA"
+    assert "unilateral para menos" in resultado["justificativa"]
+
+
+def test_modelo2_diferenca_explicada_por_parcela():
+    contexto = _contexto(parcelas={(9900999, 2023, "ISS_MUN", "SIOPE"): {"MULTAS_JUROS": 8_000_000, "DA_PRINCIPAL": 2_000_000}})
+    resultado = simulacao.aplicar_evidencia(_entrada_modelo2({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(110_000_000), "SIOPS": _v(100_000_000),
+        "SICONFI_RREO": _v(100_000_000),
+    }), contexto)
+    assert resultado["status"] == "AUTOMATICA" and resultado["valor_proposto"] == 100_000_000
+    assert "SIOPE multas e juros + SIOPE dívida ativa" in resultado["justificativa"]
+    assert resultado["peso_dca"] > simulacao.peso_evidencia(["SIOPS", "SICONFI_RREO"])
+
+
+def _cota(valores):
+    caso = _entrada_modelo2(valores)
+    caso.componente = "COTA_ICMS_MUN"
+    return caso
+
+
+def test_modelo2_dca_liquida_do_fundeb_vira_bruta():
+    # P12 definida: a cota-parte entra bruta; DCA = 80% do bruto das demais fontes é trocada pelo bruto.
+    resultado = simulacao.aplicar_evidencia(_cota({
+        "SICONFI_DCA": _v(80_000_000, "REFERENCIA"), "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000),
+        "TCE": _v(100_000_000),
+    }), _contexto())
+    assert resultado["regra"] == "E2E" and resultado["status"] == "AUTOMATICA"
+    assert resultado["valor_proposto"] == 100_000_000
+    assert "líquida do FUNDEB" in resultado["justificativa"] and "R$ 800.000,00" in resultado["justificativa"]
+    assert "p12" not in simulacao.FiltrosSimulador.de_query({"p12": "bruta"}).query()
+
+
+def test_modelo2_fonte_liquida_do_fundeb_confirma_dca_bruta():
+    # TCE e SIOPS informaram a cota já deduzida dos 20% do FUNDEB: confirmam a DCA bruta, não a contradizem.
+    resultado = simulacao.aplicar_evidencia(_cota({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(100_000_000), "SIOPS": _v(80_000_000),
+        "TCE": _v(80_000_000),
+    }), _contexto())
+    assert resultado["regra"] == "E1A" and resultado["status"] == "AUTOMATICA"
+    assert resultado["valor_proposto"] == 100_000_000 and resultado["peso_dca"] == 2.25
+    assert set(resultado["fontes_liquidas_fundeb"]) == {"SIOPS", "TCE"}
+    assert "TCE informou R$ 800.000,00, 80% de R$ 1.000.000,00" in resultado["justificativa"]
+    # consenso de valores líquidos não derruba uma DCA bruta (antes virava troca E2D)
+    contra = simulacao.aplicar_evidencia(_cota({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(80_000_000), "SIOPS": _v(80_000_000),
+        "TCE": _v(80_000_000),
+    }), _contexto())
+    assert contra["regra"] == "E1A" and contra["valor_proposto"] == 100_000_000
+    # sem DCA: a fonte líquida é reconhecida contra as demais e o valor adotado é o bruto
+    sem_dca = simulacao.aplicar_evidencia(_cota({
+        "SICONFI_DCA": {"original": None, "estado": "AUSENTE"}, "SIOPE": _v(100_000_000), "SIOPS": _v(100_000_000), "TCE": _v(80_000_000),
+    }), _contexto())
+    assert sem_dca["regra"] == "E2B" and sem_dca["valor_proposto"] == 100_000_000
+    assert sem_dca["peso_alternativa"] == 2.25 and sem_dca["fontes_liquidas_fundeb"] == ["TCE"]
+    # fora da cota-parte não há conversão
+    iss = simulacao.aplicar_evidencia(_entrada_modelo2({
+        "SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(80_000_000), "SIOPS": _v(80_000_000),
+        "TCE": _v(80_000_000),
+    }), _contexto())
+    assert iss["regra"] == "E2D" and iss["fontes_liquidas_fundeb"] == []
+
+
+def test_modelo2_imaterialidade_e_piso_de_concordancia():
+    divergente = {"SICONFI_DCA": _v(100_000_000, "REFERENCIA"), "SIOPE": _v(60_000_000)}
+    sem_contexto = simulacao.aplicar_evidencia(_entrada_modelo2(divergente))
+    assert sem_contexto["status"] == "PENDENTE"
+    grande = _contexto(receita_media_ente={9900999: 10**13}, anos_componente={"ISS_MUN": 7}, total_nacional=10**15)
+    imaterial = simulacao.aplicar_evidencia(_entrada_modelo2(divergente), grande)
+    assert imaterial["regra"] == "E1C" and imaterial["status"] == "AUTOMATICA"
+    # R$ 20 mil × R$ 20,9 mil: 4,3% já não "concorda" (o piso caiu de R$ 1.000 para R$ 100)
+    assert not simulacao._concorda(2_000_000, 2_090_000) and simulacao._concorda(2_000_000, 2_009_000)
+
+
+def test_modelo2_conservacao_da_uf_reforca_a_troca():
+    def caso_cota(contexto):
+        caso = _entrada_modelo2({
+            "SICONFI_DCA": _v(150_000_000_00, "REFERENCIA"), "SIOPE": _v(100_000_000_00), "SIOPS": _v(100_000_000_00),
+        })
+        caso.componente = "COTA_ICMS_MUN"
+        return simulacao.aplicar_evidencia(caso, contexto)
+    sem = caso_cota(_contexto())
+    assert sem["status"] == "PENDENTE"  # SIOPE + SIOPS (1,25) não bastam contra uma DCA isolada (1,75)
+    uf_inflada = _contexto(conservacao={("BA", 2023): {"repasse": 1_000_000_000_00, "soma": 1_050_000_000_00}})
+    com = caso_cota(uf_inflada)
+    assert com["regra"] == "E2D" and com["valor_proposto"] == 100_000_000_00
+    assert "repasse declarado pelo Estado" in com["justificativa"] and com["peso_alternativa"] == 1.75
+
+
+def test_interface_simulador_e_exportacao(demo):
+    destino, _ = demo
+    with TestClient(criar_app(destino)) as cliente:
+        _entrar(cliente, destino, "Simulador", "ANALISTA", "/simulador")
+        pagina = cliente.get("/simulador?diferenca=").text
+        assert "Simulador comparativo de metodologias" in pagina
+        assert "Modelo 1 · Degraus" in pagina and "Modelo 2 · Evidência e impacto" in pagina
+        assert "Fictício B" in pagina and "não registra nem altera decisões" in pagina
+        resposta = cliente.get("/simulador/exportar?diferenca=")
+        assert resposta.status_code == 200
+        assert resposta.headers["content-type"].startswith("text/csv")
+        texto = resposta.content.decode("utf-8-sig")
+        assert texto.splitlines()[0].startswith("execucao;codigo_ente") and "9900102" in texto
+        assert "Exportar consulta em Excel" in pagina
+        assert "Modelo 3 · Funil de validação externa" in pagina and "casos resolvidos em cada etapa do funil" in pagina
+        resposta = cliente.get("/simulador/exportar?diferenca=&formato=xlsx")
+        assert resposta.status_code == 200
+        assert resposta.headers["content-type"].startswith("application/vnd.openxmlformats")
+        assert resposta.headers["content-disposition"].endswith('.xlsx"')
+        from openpyxl import load_workbook
+        livro = load_workbook(io.BytesIO(resposta.content), read_only=True)
+        assert livro.sheetnames == ["Casos", "Resumo"]
+        linhas = list(livro["Casos"].iter_rows(values_only=True))
+        assert linhas[0][:3] == ("Execução", "Código IBGE", "Ente")
+        assert "M3 · regra" in linhas[0] and "Diferença M3 − M2 aprovado (R$)" in linhas[0]
+        regras_m3 = {l[linhas[0].index("M3 · regra")] for l in linhas[1:]}
+        assert regras_m3 <= {"F1A", "F1B", "F2A", "F2B", "F3A", "F3B", "F4", "FP", "UNIVERSO"} and regras_m3
+        assert any(linha[1] == 9900102 for linha in linhas[1:])
+        coluna_valor = linhas[0].index("Valor original (R$)")
+        csv_linhas = [l.split(";") for l in texto.splitlines()[1:]]
+        assert all(re.fullmatch(r"-?\d+,\d{2}", l[8]) for l in csv_linhas if l[8])  # reais, vírgula decimal
+        centavos = sorted(round(float(l[8].replace(",", ".")) * 100) for l in csv_linhas if l[8])
+        reais = sorted(round(l[coluna_valor] * 100) for l in linhas[1:] if l[coluna_valor] is not None)
+        assert centavos == reais  # mesmos valores, em reais no Excel
+        resumo = {l[0]: l[1] for l in livro["Resumo"].iter_rows(values_only=True) if l and l[0]}
+        assert resumo["Cota-parte do ICMS"].startswith("cota-parte bruta") and resumo["Casos exportados"] == len(linhas) - 1
+
+
+def test_filtro_simulador_preserva_toda_a_base():
+    assert simulacao.FiltrosSimulador.de_query({}).diferenca == "modelos"
+    assert simulacao.FiltrosSimulador.de_query({"diferenca": ""}).diferenca == ""
 
 
 def test_importacao_pela_tela_com_previa_e_erros(demo):
@@ -928,6 +1195,8 @@ def test_bases_de_layout_fixo(tmp_path):
         tce = vigente("TCE", "COTA_RECEBIDA_TOTAL")
         assert tce.conceito == "BRUTO" and json.loads(tce.procedencia)["natureza_informada"] == "Bruto publicado"
         assert vigente("SICONFI_DCA", "COMPENSACAO") is None  # fora do art. 115
+        compensacao = vigente("SICONFI_DCA", "COTA_COMPENSACAO")  # só a da LC 194 do Município, para o ajuste E4
+        assert (compensacao.componente_id, compensacao.parcela, compensacao.estado) == ("COTA_ICMS_MUN", "COMPENSACAO", "ZERO")
         lote_tce = session.get(cf.Lote, resultados["TCE"]["lote"])
         assert lote_tce.data_extracao == datetime(2026, 10, 28)
     # mesmo arquivo: reconhecido; valor alterado: só a diferença vira nova versão
@@ -953,7 +1222,7 @@ def test_bases_de_layout_fixo_pela_tela(tmp_path):
     with TestClient(criar_app(destino)) as cliente:
         _entrar(cliente, destino, "Analista", "ANALISTA", "/")
         pagina = cliente.get("/importar").text
-        assert "DCA, SIOPS, SIOPE e Tribunais de Contas" in pagina
+        assert "DCA, SIOPS, SIOPE, Tribunais de Contas, Estados e Banco do Brasil" in pagina
         recusa = cliente.post("/importar/bases", files=[("arquivos", ("x.xlsx", _xlsx({"A": [("a",)]})))])
         assert recusa.status_code == 400 and "layout não reconhecido" in recusa.json()["erro"]
         resposta = cliente.post("/importar/bases", files=[("arquivos", (nome, conteudo)) for nome, conteudo in planilhas.items()])
@@ -1062,3 +1331,197 @@ def test_envio_arquivo_por_arquivo(tmp_path):
         _entrar(cliente, destino, "Outra pessoa", "ANALISTA", "/")
         assert "outro usuário" in cliente.post("/importar/bases", data={"tokens": [outro]}).json()["erro"]
     assert not list((tmp_path / "importacoes" / "pendentes").glob("base-*"))
+
+
+# ---------------------------------------------------------------- Modelo 3 · funil de validação externa
+def _funil(valores, componente="ISS_MUN", parcelas=None, uf="BA", exercicio=2023):
+    from validacao.conferencia import funil
+    caso = _entrada_modelo2(valores)
+    caso.componente, caso.uf, caso.exercicio = componente, uf, exercicio
+    contexto = funil.montar_contexto([caso], {(caso.id_ente, exercicio, componente): parcelas or {}})
+    return funil.aplicar_funil(caso, contexto)
+
+
+def test_funil_etapa1_dca_validada_e_corrigida():
+    # 1a: DCA coincide com o tribunal (± R$ 10,00)
+    r = _funil({"SICONFI_DCA": _v(100_000_000), "TCE": _v(100_000_900)})
+    assert r["regra"] == "F1A" and r["valor_proposto"] == 100_000_000 and r["confirmacao_externa"]
+    # R$ 10,01 de diferença já não coincide; sem demonstrativos nem correção, vai à etapa 4 (TCE sozinho)
+    r = _funil({"SICONFI_DCA": _v(100_000_000), "TCE": _v(100_001_001)})
+    assert r["regra"] == "F4" and r["valor_proposto"] == 100_001_001 and not r["confirmacao_externa"]
+    # 1b cota-parte: DCA líquida do Fundeb (÷ 0,8) e Fundeb somado (÷ 1,2) -> adota o tribunal
+    r = _funil({"SICONFI_DCA": _v(80_000_000), "TCE": _v(100_000_000)}, componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F1B" and r["valor_proposto"] == 100_000_000 and r["formula"].startswith("E1")
+    r = _funil({"SICONFI_DCA": _v(120_000_000), "TCE": _v(100_000_000)}, componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F1B" and r["formula"].startswith("E2")
+    # 1b erro de unidade: na multiplicação a tolerância é R$ 1,00 por unidade do fator
+    r = _funil({"SICONFI_DCA": _v(1_000_000), "TCE": _v(100_005_000)})
+    assert r["regra"] == "F1B" and "× 100" in r["formula"]
+    # 1b ISS: deduções não abatidas (DCA = TCE + deduções) e composição incompleta (só o principal)
+    r = _funil({"SICONFI_DCA": _v(105_000_000), "TCE": _v(100_000_000)}, parcelas={"OUTRAS_DEDUCOES": -5_000_000})
+    assert r["regra"] == "F1B" and r["formula"].startswith("E6") and r["valor_proposto"] == 100_000_000
+    r = _funil({"SICONFI_DCA": _v(90_000_000), "TCE": _v(100_000_000)},
+               parcelas={"PRINCIPAL": 90_000_000, "MULTAS_JUROS": 4_000_000, "DA_PRINCIPAL": 6_000_000})
+    assert r["regra"] == "F1B" and r["formula"].startswith("E5") and "principal" in r["formula"]
+
+
+def test_funil_etapas_2_3_4_e_pendente():
+    # 2a: RREO coincide com o tribunal; adota o RREO (ordem RREO, SIOPS, SIOPE)
+    r = _funil({"SICONFI_DCA": _v(50_000_000), "SICONFI_RREO": _v(100_000_000), "SIOPS": _v(100_000_500),
+                "TCE": _v(100_000_500)})
+    assert r["regra"] == "F2A" and r["fonte"] == "RREO" and r["valor_proposto"] == 100_000_000
+    # 2b: SIOPS líquido do Fundeb coincide com o tribunal após ÷ 0,8; adota o tribunal
+    r = _funil({"SICONFI_DCA": _v(50_000_000), "SIOPS": _v(80_000_000), "TCE": _v(100_000_000)},
+               componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F2B" and r["valor_proposto"] == 100_000_000
+    # 3a: DCA = RREO = SIOPS, sem confirmação externa
+    r = _funil({"SICONFI_DCA": _v(100_000_000), "SICONFI_RREO": _v(100_000_200), "SIOPS": _v(100_000_400)})
+    assert r["regra"] == "F3A" and r["valor_proposto"] == 100_000_000 and not r["confirmacao_externa"]
+    # 3a sem DCA: dois demonstrativos iguais; adota o primeiro do par
+    r = _funil({"SICONFI_DCA": _v(None, estado="AUSENTE"), "SIOPS": _v(70_000_000), "SIOPE": _v(70_000_000)})
+    assert r["regra"] == "F3A" and r["fonte"] == "SIOPS"
+    # 3b cota-parte: DCA líquida do Fundeb, RREO e SIOPS no bruto; adota o valor não afetado pelo erro
+    r = _funil({"SICONFI_DCA": _v(80_000_000), "SICONFI_RREO": _v(100_000_000), "SIOPS": _v(100_000_000)},
+               componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F3B" and r["fonte"] == "RREO" and r["valor_proposto"] == 100_000_000
+    # no ISS, a 3b só admite erro de unidade
+    r = _funil({"SICONFI_DCA": _v(80_000_000), "SICONFI_RREO": _v(100_000_000), "SIOPS": _v(100_000_000)})
+    assert r["regra"] == "FP" and r["status"] == "PENDENTE" and r["valor_aprovado"] == 80_000_000
+    # pendente: sem fonte externa e só duas declarações concordantes
+    r = _funil({"SICONFI_DCA": _v(100_000_000), "SICONFI_RREO": _v(100_000_000), "SIOPS": _v(90_000_000)})
+    assert r["regra"] == "FP" and r["valor_proposto"] is None
+
+
+def test_funil_tribunal_publicado_liquido_por_grupo():
+    from validacao.conferencia import funil
+    casos = []
+    for indice in range(5):
+        caso = _entrada_modelo2({"SICONFI_DCA": _v(100_000_000), "SIOPS": _v(100_000_000),
+                                 "TCE": {**_v(80_000_000), "conceito": "INDEFINIDO"}})
+        caso.id_ente, caso.componente, caso.uf = 9900100 + indice, "COTA_ICMS_MUN", "SP"
+        casos.append(caso)
+    contexto = funil.montar_contexto(casos, {})
+    assert ("SP", 2023, "INDEFINIDO") in contexto.grupos_tce_liquido
+    r = funil.aplicar_funil(casos[0], contexto)
+    assert r["regra"] == "F1A" and "convertido para o bruto" in r["justificativa"]
+
+
+def test_funil_marcadores_de_duplicidade():
+    from validacao.conferencia import funil
+    linhas = []
+    for id_ente, ano in ((9900201, 2022), (9900202, 2022), (9900201, 2023)):
+        caso = _entrada_modelo2({"SICONFI_DCA": _v(5_000_000)})
+        caso.id_ente, caso.exercicio = id_ente, ano
+        linhas.append({"caso": caso, "funil": funil._resultado(5_000_000, 5_000_000, "DCA", "F3A", "teste")})
+    contagem = funil.marcar_duplicidades(linhas)
+    assert contagem == {"v4": 2, "v5": 2}
+    assert linhas[0]["funil"]["status"] == "AUTOMATICA"  # marcador não altera a decisão
+
+
+def test_planilha_dos_estados_e_do_bb(tmp_path):
+    from openpyxl import Workbook
+
+    from validacao.conferencia import bases_fixas
+
+    destino = tmp_path / "estados.sqlite"
+    construir(destino)
+    engine = criar_engine(destino)
+    with Session(engine) as session:
+        bases_fixas.importar_arquivo(session, "dca.xlsx", _planilhas_fixas()["dca.xlsx"], "teste")
+    livro = Workbook()
+    cota = livro.active
+    cota.title = "cota-parte"
+    cota.append(("cod_ibge6", "cod_ibge7", "Nome", "ano", "DCA (bruto)", "inf Estados", "inf Estados2", "inf BB"))
+    cota.append((990010, 9900101, "Fictício A", 2023, 2_000_000.0, 2_000_005.0, 0, 2_000_000.0))
+    cota.append((990010, 9900101, "Fictício A", 2022, 1_000_000.0, "=E2", 1_000_000.0, None))  # fórmula: recusada
+    ufs = livro.create_sheet("UFs")
+    ufs.append(("cod_ibge", "UF", "tipo_receita", "ano", "DCA (bruto)", "Confaz"))
+    ufs.append((29, "BA", "ICMS", 2023, 50_000_000.0, 49_000_000.0))
+    livro.create_sheet("explicação")
+    buffer = io.BytesIO()
+    livro.save(buffer)
+    conteudo = buffer.getvalue()
+    assert bases_fixas.identificar("qualquer.xlsx", conteudo) == "ESTADOS"
+    with Session(engine) as session:
+        r = bases_fixas.importar_arquivo(session, "estados.xlsx", conteudo, "teste")
+    assert r["situacao"] == "IMPORTADO" and len(r["lotes"]) == 4 and r["ocorrencias"] == 1
+    with Session(engine) as session:
+        def vigente(declaracao, campo, ente=9900101, ano=2023):
+            return session.scalar(select(cf.Registro).where(
+                cf.Registro.declaracao_id == declaracao, cf.Registro.campo == campo, cf.Registro.id_ente == ente,
+                cf.Registro.exercicio == ano, cf.Registro.vigente.is_(True)))
+
+        sefaz = vigente("SEFAZ", "COTA_RECEBIDA_TOTAL")
+        assert (sefaz.valor_centavos, sefaz.componente_id, sefaz.conceito) == (200_000_500, "COTA_ICMS_MUN", "BRUTO")
+        assert vigente("SEFAZ", "COTA_RECEBIDA_TOTAL", ano=2022) is None  # a fórmula não vira valor
+        assert vigente("SEFAZ_2", "COTA_RECEBIDA_TOTAL").estado == "ZERO"
+        assert vigente("BB", "COTA_RECEBIDA_TOTAL", ano=2022) is None and vigente("BB", "COTA_RECEBIDA_TOTAL").valor_centavos == 200_000_000
+        confaz = vigente("CONFAZ", "ICMS_TOTAL", 29)
+        assert (confaz.componente_id, confaz.conceito) == ("ICMS_UF", "SEM_ADICIONAL")
+    with Session(engine) as session:
+        assert bases_fixas.importar_arquivo(session, "estados.xlsx", conteudo, "teste")["situacao"] == "JA_IMPORTADO"
+
+
+def test_confaz_comparado_com_o_adicional_da_dca():
+    dca = montar_fonte("SICONFI_DCA", [
+        RegistroV(1, "SICONFI_DCA", "ICMS_TOTAL", "TOTAL", "LIQUIDO", 1_050, "VALOR"),
+        RegistroV(2, "SICONFI_DCA", "ICMS_BRUTO", "BRUTO", "BRUTO", 1_000, "VALOR"),
+        RegistroV(3, "SICONFI_DCA", "ICMS_FECOP", "FECOP", "BRUTO", 60, "VALOR"),
+        RegistroV(4, "SICONFI_DCA", "ICMS_FECOP_OUTRAS_DEDUCOES", "FECOP_OUTRAS_DEDUCOES", "DEDUCAO", 10, "VALOR"),
+    ])
+    confaz = montar_fonte("CONFAZ", [RegistroV(5, "CONFAZ", "ICMS_TOTAL", "TOTAL", "SEM_ADICIONAL", 1_000, "VALOR")])
+    c = comparar(dca, confaz, "LIQUIDO")
+    assert c.situacao == "RESSALVA" and c.valor_fonte == 1_050 and c.absoluta == 0 and "FECOP" in c.motivo
+
+
+def test_funil_cota_parte_com_bb_sefaz_e_compensacao():
+    # 1a pelo BB quando o tribunal diverge
+    r = _funil({"SICONFI_DCA": _v(100_000_000), "TCE": _v(90_000_000), "BB": _v(100_000_500)}, componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F1A" and "BB" in r["justificativa"]
+    # 1b: com mais de uma fonte coincidente após a correção, prevalece a ordem Sefaz, BB, TCE
+    r = _funil({"SICONFI_DCA": _v(80_000_000), "TCE": _v(100_000_000), "BB": _v(100_000_000)}, componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F1B" and r["fonte"] == "BB"
+    r = _funil({"SICONFI_DCA": _v(80_000_000), "SEFAZ": _v(100_000_000), "BB": _v(100_000_000)}, componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F1B" and r["fonte"] == "Sefaz"
+    # 1b E4b: DCA + compensação registrada à parte = fonte agregada; adota a DCA
+    from validacao.conferencia import funil
+    caso = _entrada_modelo2({"SICONFI_DCA": _v(100_000_000), "BB": _v(103_000_000)})
+    caso.componente, caso.uf, caso.exercicio = "COTA_ICMS_MUN", "BA", 2023
+    contexto = funil.montar_contexto([caso], {}, {(caso.id_ente, 2023): 3_000_000})
+    r = funil.aplicar_funil(caso, contexto)
+    assert r["regra"] == "F1B" and r["fonte"] == "DCA" and r["valor_proposto"] == 100_000_000 and r["formula"].startswith("E4b")
+    # 4: sem demonstrativos, fonte externa sozinha na ordem Sefaz, BB, TCE
+    r = _funil({"SICONFI_DCA": _v(None, estado="AUSENTE"), "TCE": _v(69_000_000), "SEFAZ": _v(70_000_000),
+                "BB": _v(71_000_000)}, componente="COTA_ICMS_MUN")
+    assert r["regra"] == "F4" and r["fonte"] == "Sefaz"
+    # no ISS, Sefaz e BB não são fontes de validação
+    r = _funil({"SICONFI_DCA": _v(100_000_000), "BB": _v(100_000_000)})
+    assert r["regra"] == "FP"
+
+
+def test_funil_grupo_liquido_pela_sefaz_e_verificacoes():
+    from validacao.conferencia import funil
+    casos, linhas = [], []
+    for indice in range(5):
+        for ano in (2021, 2022, 2023):
+            sefaz = 100_000_000 if not (indice == 0 and ano == 2023) else 50_000_000
+            caso = _entrada_modelo2({"SICONFI_DCA": _v(100_000_000), "SIOPS": _v(125_000_000), "SEFAZ": _v(sefaz),
+                                     "TCE": {**_v(80_000_000), "conceito": "INDEFINIDO"}})
+            caso.id_ente, caso.componente, caso.uf, caso.exercicio = 9900300 + indice, "COTA_ICMS_MUN", "SP", ano
+            caso.nome_ente = f"Município {indice}"
+            casos.append(caso)
+    contexto = funil.montar_contexto(casos, {})
+    assert ("SP", 2022, "INDEFINIDO") in contexto.grupos_tce_liquido  # 0,8 da Sefaz (o SIOPS daria 0,64)
+    assert contexto.base_grupo_tce[("SP", 2022, "INDEFINIDO")] == "Sefaz"
+    for caso in casos:
+        linhas.append({"caso": caso, "funil": funil.aplicar_funil(caso, contexto)})
+    assert linhas[0]["funil"]["regra"] == "F1A" and "TCE ÷ Sefaz" in linhas[0]["funil"]["justificativa"]
+    contagem = funil.marcar_verificacoes(linhas)
+    marcados = [l for l in linhas if l["funil"]["marcadores"]]
+    assert contagem["v1"] == 1 and contagem["v6"] == 1
+    # V4: em 2021 e 2022 a Sefaz informa o mesmo valor a todos (legítimo); em 2023, não
+    v4 = {l["caso"].exercicio for l in linhas if any(m.startswith("V4") for m in l["funil"]["marcadores"])}
+    assert v4 == {2023} and contagem["v4"] == 5
+    v1 = [l for l in marcados if any(m.startswith("V1") for m in l["funil"]["marcadores"])]
+    assert [(l["caso"].id_ente, l["caso"].exercicio) for l in v1] == [(9900300, 2023)]
+    assert v1[0]["funil"]["status"] == "AUTOMATICA"  # marcador não altera a decisão

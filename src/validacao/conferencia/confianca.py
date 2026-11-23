@@ -1,7 +1,8 @@
 """Nível de confiança do valor principal de cada caso (escala 0 a 5).
 
 A pergunta respondida é: o valor principal desta linha é confiável para entrar na apuração?
-Fontes independentes: SIOPE, SIOPS e TCE. RREO e MSC são do mesmo declarante da DCA (SICONFI):
+Fontes independentes: SIOPE, SIOPS, TCE, Sefaz e BB (cota-parte) e Confaz (ICMS estadual). A 2ª extração
+das Sefaz (Sefaz 2) é conferida, mas não conta: não é independente da 1ª. RREO e MSC são do mesmo declarante da DCA (SICONFI):
 reforçam, mas não bastam sozinhos. "Coincide" = dentro da tolerância da regra DAX (padrão:
 1% e R$ 1.000 — a divergência exige exceder os dois).
 
@@ -33,7 +34,7 @@ NIVEIS = {
     0: ("Sem confiança", "c0"),
 }
 NAO_AVALIADO = ("Não avaliado", "cna")
-INDEPENDENTES = ("SIOPE", "SIOPS", "TCE")
+INDEPENDENTES = ("SIOPE", "SIOPS", "TCE", "SEFAZ", "BB", "CONFAZ")
 MESMO_DECLARANTE = ("SICONFI_RREO", "SICONFI_MSC")
 TETO_COMPONENTE = {"ICMS_UF": 4}
 FATOR_FUNDEB = 0.8
@@ -116,8 +117,15 @@ def classificar(componente: str, principal: str | None, valores: dict, situacao_
     return nivel, motivo
 
 
+def _valor_comparado(item: dict) -> int:
+    """Valor da fonte no conceito da comparação (ex.: Confaz + adicional do FECOP); senão, o declarado."""
+    if item.get("comparabilidade") in ("SIM", "RESSALVA") and item.get("normalizado") is not None:
+        return item["normalizado"]
+    return item["original"]
+
+
 def _classificar(componente, principal, valores, tem, comparavel, concorda, descreve_div, tol):
-    indep_vals = [(d, valores[d]["original"]) for d in INDEPENDENTES if tem(d)]
+    indep_vals = [(d, _valor_comparado(valores[d])) for d in INDEPENDENTES if tem(d)]
 
     if principal is None:
         grupo = _consenso(indep_vals, tol)
@@ -178,7 +186,7 @@ def _classificar(componente, principal, valores, tem, comparavel, concorda, desc
         sic_div = [d for d in MESMO_DECLARANTE if d != principal and comparavel(d)]
         return 2, (f"Sem fonte independente comparável; {', '.join(descreve_div(d) for d in sic_div)} "
                    "(mesmo declarante).")
-    grupo = _consenso([(d, valores[d]["original"]) for d in divergem], tol)
+    grupo = _consenso([(d, _valor_comparado(valores[d])) for d in divergem], tol)
     inicio = "DCA declara zero" if zero else "DCA diverge de todas as fontes"
     if grupo:
         return 1, (f"{inicio}; {_lista([d for d, _ in grupo])} concordam entre si em {reais_curto(grupo[0][1])}. "

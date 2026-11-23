@@ -38,7 +38,7 @@ Outros comandos:
 | `python -m validacao migrar` | Só a migração, com backup. É idempotente. |
 | `python -m validacao validar` | Executa as regras sobre os registros atuais (todos os componentes). |
 | `python -m validacao importar-siconfi` | Importa o pacote de RREO e MSC da pasta Bases Conjuntas e valida. Também disponível na aba Importar. |
-| `python -m validacao importar-bases [planilhas...]` | Importa DCA, SIOPS, SIOPE e TCE (layout fixo) e valida se algo mudou. Sem argumentos, usa as planilhas da pasta Bases Conjuntas. Também na aba Importar. |
+| `python -m validacao importar-bases [planilhas...]` | Importa DCA, SIOPS, SIOPE, TCE e a planilha dos Estados e do BB (layout fixo) e valida se algo mudou. Sem argumentos, usa as planilhas da pasta Bases Conjuntas. Também na aba Importar. |
 | `python -m validacao demo --porta 8010` | Cria `data/demonstracao.sqlite` com **dados fictícios** dos 8 cenários de aceitação e abre a tela. |
 | `python -m validacao servir-v1` | Telas da versão 1 (legado), na porta 8001. |
 | `python -m pytest tests/test_conferencia.py` | Testes das regras e dos cenários de aceitação (instale antes `requirements-dev.txt`). |
@@ -67,23 +67,31 @@ conferência automática dos arquivos (RREO = base, soma da MSC = base, valores 
 As linhas de detalhe ficam em `data/detalhes_siconfi.sqlite`, separado do banco principal. RREO e MSC
 pertencem ao mesmo declarante (SICONFI): divergem da DCA pela regra DSI, mas não contam como validação independente.
 
-## Bases de layout fixo (DCA, SIOPS, SIOPE e Tribunais de Contas)
+## Bases de layout fixo (DCA, SIOPS, SIOPE, Tribunais de Contas, Estados e Banco do Brasil)
 
 Na aba **Importar**, envie uma ou mais destas planilhas (de uma vez); o tipo é reconhecido pelas abas, não pelo nome:
 
 | Base | Planilha usual | Abas lidas | Campos |
 |---|---|---|---|
-| DCA — SICONFI | `SICONFI_DCA_Receitas_2019_2025.xlsx` | `SICONFI` e `SICONFI_BRUTO` | ISS, cota-parte e ICMS (totais), cota repassada; bruto, FUNDEB, deduções e FECOP |
+| DCA — SICONFI | `SICONFI_DCA_Receitas_2019_2025.xlsx` | `SICONFI` e `SICONFI_BRUTO` | ISS, cota-parte e ICMS (totais), cota repassada; bruto, FUNDEB, deduções e FECOP; compensação da LC 194 dos Municípios (`COTA_COMPEN_FIN`) |
 | SIOPS | `SIOPS - ICMS e ISS.xlsx` | `Municipios` e `Estados` | ISS, cota-parte, ICMS e cota repassada |
 | SIOPE | `Dados SIOPE - ICMS e ISS.xlsx` | `Municipios` e `Estados` | ISS e ICMS com abertura (principal, multas, dívida ativa, FECOP) e cota-parte |
 | Tribunais de Contas | `TCE Arrecadacao Municipios - 2019_2025.xlsx` | `Base detalhada` (+ `ISS` e `Leia-me`) | Abertura do ISS e da cota-parte, com a natureza do valor informada pelo tribunal |
+| Estados, BB e Confaz | `Simulação - efeitos dos erros LC 194 e fundos.xlsx` | `cota-parte` e `UFs` | Cota-parte informada pelas Sefaz (`inf Estados` → **Sefaz**; `inf Estados2` → **Sefaz 2**) e creditada pelo Banco do Brasil (`inf BB` → **BB**); ICMS do Confaz (`Confaz`, sem o FECOP) |
+
+A planilha dos Estados gera um lote por declaração. Célula com fórmula (ex.: `inf Estados` de Cuiabá/2023, cópia
+da DCA) é recusada e vai para as ocorrências; zero é gravado como zero e não valida nenhum valor. Na conferência,
+Sefaz, BB e Confaz contam como fontes independentes; a Sefaz 2 é conferida, mas não conta (não é independente da 1ª
+extração). O Confaz é comparado com a DCA acrescida do adicional do FECOP que o próprio Estado declarou.
 
 A leitura repete a carga original da versão 1 (mesmas colunas, campos, parcelas e conceitos). Reimportar as
 planilhas atuais sobre o banco migrado dá **0 novos e 0 versões** nos 637.282 valores (conferido). Numa planilha
 atualizada, só o que mudou vira nova versão; casos já decididos voltam para reanálise. Arquivo idêntico a um já
 importado é ignorado. A DCA é processada primeiro porque completa o cadastro de entes; códigos sem ente vão para
-o relatório de ocorrências do lote, sem interromper a importação. Células vazias não geram registro e compensações
-financeiras (fora do art. 115) são ignoradas. A data de extração vem do `Leia-me` (TCE) ou das propriedades da planilha.
+o relatório de ocorrências do lote, sem interromper a importação. Células vazias não geram registro; das compensações
+financeiras (fora do art. 115), só a da LC 194 registrada pelo Município é guardada, como parcela informativa usada
+no ajuste E4 do Modelo 3. Quando a leitura de um layout passa a reconhecer campos novos, o mesmo arquivo pode ser
+importado de novo, e só os valores novos são gravados. A data de extração vem do `Leia-me` (TCE) ou das propriedades da planilha.
 
 ## Jornada principal
 
@@ -116,6 +124,41 @@ histórico → registrar a decisão → consultar e exportar o resultado.
 - **Resultado**: valores propostos, adotados e pendentes; diferenças na arrecadação;
   exportação CSV/XLSX da consulta e **pacote de conferência** (ZIP com resultado, alertas,
   decisões, registros, parâmetros, execução e mapeamentos).
+- **Simulador**: aplica, em modo somente leitura, três hipóteses a toda a última execução:
+  a metodologia dos degraus (DCA, maioria entre bases, mediana e estimativa residual), a
+  metodologia de evidência **M2.4** e o **funil de validação externa** (Modelo 3, Nota Técnica
+  "Metodologia dos Dados" v1.24 e minutas de cota-parte e ISS). No funil, cada caso para na
+  primeira etapa atendida: 1a DCA = fonte externa (± R$ 10,00); 1b DCA corrigida (Fundeb ÷ 0,8 ou
+  ÷ 1,2, unidade; no ISS, deduções não abatidas e composição incompleta pelos componentes do TCE);
+  2a/2b RREO, SIOPS ou SIOPE = fonte externa; 3a/3b DCA = dois demonstrativos iguais; 4 fonte externa
+  sozinha; senão, pendente. Fontes externas: na cota-parte, Sefaz (1ª extração), BB e tribunal de contas,
+  nessa ordem (definida pelo grupo; inverte a das minutas v1.00 e da nota v1.24); no ISS, o tribunal. A cota-parte publicada líquida do Fundeb pelo tribunal é convertida ao
+  bruto por grupo (UF × exercício × natureza, razão mediana TCE ÷ Sefaz entre 0,79 e 0,83; sem Sefaz no
+  grupo, ÷ SIOPS). A compensação da LC 194 registrada pelo Município entra no ajuste E4 (E4b nas Etapas
+  1b, 2b e 3b; E4a só na 3b). As verificações V1 a V7 marcam os casos sem alterar o valor; a dedução do
+  art. X+7 ainda não é aplicada. Com a cobertura de tribunais da nota técnica, o funil reproduz as
+  contagens publicadas (cota-parte 75,9% / 78,7% / 81,5% / 98,4% / 100%; ISS 60,8% / 61,4% / 63,6%); só a
+  fonte adotada na Etapa 4 muda, pela ordem invertida. O código está em
+  `conferencia/funil.py`. Na M2.4 cada fonte tem um peso de independência (TCE, BB e Sefaz 1,0;
+  SIOPE e SIOPS juntos 1,25, por serem declarados pelo próprio ente; RREO e Confaz 0,5; MSC 0,25; conservação
+  da cota-parte na UF 0,5). A DCA é mantida automaticamente com peso ≥ 1,5 (ou ≥ 1,0 com folga de 0,5
+  sobre a evidência contrária) e trocada com peso ≥ 2,0 maior que o dela, qualquer que seja o tamanho
+  da diferença. A materialidade não decide a evidência: troca que altera ≥ 5% da receita média do ente,
+  ≥ 0,001 p.p. do total nacional, ou de Estado/DF fica **sujeita a visto**. Diferenças explicadas por
+  parcelas declaradas (multas, dívida ativa, FECOP, deduções) são tratadas como conceito; divergências
+  que não movem a receita média do ente (≤ 0,1%) não decidem. Picos ou quedas isolados na série,
+  valor idêntico confirmado em mais de um município (cópia) e ICMS estadual sem RREO concordante
+  impedem a automação. Cota-parte do ICMS sempre **bruta** (P12 definida): fonte declarada líquida do
+  FUNDEB (= 80% do bruto) é convertida para o bruto antes da comparação, e a DCA declarada líquida é
+  trocada pelo bruto das demais fontes (regra E2E); a justificativa mostra os dois valores. Mostra, caso a caso, valor original e proposto, regra, pesos a favor e contra, decisão
+  automática, sujeita a visto ou pendente, justificativa, efeito na receita média e no coeficiente,
+  diferença entre os modelos, ranking de ganhos e perdas e a conservação da cota-parte por UF
+  (soma das cotas municipais × repasse declarado pelo Estado). O cenário aprovado aplica só as decisões
+  automáticas; o potencial usa todos os candidatos. A consulta (ou a base inteira) pode ser exportada em
+  Excel — aba *Casos* com valores em reais, números formatados e filtros, e aba *Resumo* com o conceito da cota-parte,
+  filtros, parâmetros e contagem por regra e status — ou em CSV (valores em reais com vírgula decimal, separador `;`). Nunca grava
+  decisões. Com o `xlsxwriter` instalado (está no `requirements.txt`) o Excel da base inteira sai em cerca
+  de metade do tempo; sem ele, a exportação usa o `openpyxl`.
 - Abas auxiliares:
   - **Importar**: CSV/XLSX com prévia, mapeamento de colunas e relatório de erros.
   - **Dados brutos.**
@@ -212,7 +255,7 @@ histórico → registrar a decisão → consultar e exportar o resultado.
 - **P9:** universo (Fernando de Noronha e municípios instalados no período).
 - **P10:** fórmula e universo do coeficiente.
 - **P11:** ICMS após a cota-parte (valor lançado, 25% ou soma das cotas municipais).
-- **P12:** cota-parte antes ou depois do FUNDEB.
+- **P12 (definida):** cota-parte bruta — a retenção do FUNDEB não reduz a cota-parte no coeficiente.
 - **P13:** fundos estaduais, que dependem da informação dos Estados ao CGIBS.
 
 ## Desempenho e operação

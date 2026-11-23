@@ -108,6 +108,54 @@ DECLARACOES = (
         "ordem": 9,
     },
     {
+        "id": "SEFAZ",
+        "sigla": "Sefaz",
+        "nome": "Secretarias de Fazenda estaduais — cota-parte repassada a cada Município (1ª extração)",
+        "sistema": "Estado (sites e portais das Sefaz)",
+        "grupo_independencia": "ESTADO",
+        "papel": "AUXILIAR",
+        "descricao": "Valor que o Estado informa ter repassado ao Município a título de cota-parte (coluna 'inf Estados'). "
+                     "Fonte de validação da cota-parte (minuta, art. X+1, VII). Independente do Município.",
+        "base_legal": "LC 227/2026, art. 116, § 3º (cota-parte pela fonte pagadora).",
+        "ordem": 10,
+    },
+    {
+        "id": "SEFAZ_2",
+        "sigla": "Sefaz 2",
+        "nome": "Secretarias de Fazenda estaduais — cota-parte repassada (2ª extração)",
+        "sistema": "Estado (sites e portais das Sefaz)",
+        "grupo_independencia": "ESTADO",
+        "papel": "AUXILIAR",
+        "descricao": "Segunda extração dos mesmos portais (coluna 'inf Estados2'). Conferida contra a DCA, mas não entra "
+                     "nos modelos: a metodologia usa só a 1ª extração, e as duas não são fontes independentes entre si.",
+        "base_legal": "LC 227/2026, art. 116, § 3º.",
+        "ordem": 11,
+    },
+    {
+        "id": "BB",
+        "sigla": "BB",
+        "nome": "Banco do Brasil — créditos da cota-parte (portal DAF, data do crédito)",
+        "sistema": "Instituição financeira",
+        "grupo_independencia": "BANCO",
+        "papel": "AUXILIAR",
+        "descricao": "Cota-parte creditada ao Município pela instituição financeira (coluna 'inf BB'), em 14 UFs. "
+                     "Fonte de validação da cota-parte (minuta, art. X+1, VI). Independente do Município.",
+        "base_legal": "LC 227/2026, art. 116, § 3º (cota-parte pela fonte pagadora).",
+        "ordem": 12,
+    },
+    {
+        "id": "CONFAZ",
+        "sigla": "Confaz",
+        "nome": "Confaz — arrecadação de ICMS informada pelos Estados (boletim)",
+        "sistema": "Confaz/Cotepe",
+        "grupo_independencia": "CONFAZ",
+        "papel": "AUXILIAR",
+        "descricao": "ICMS informado pelo Estado ao Confaz, sem o adicional do fundo de combate à pobreza (FECOP). "
+                     "Comparado com a DCA acrescida do adicional que o próprio Estado declarou.",
+        "base_legal": "LC 227/2026, art. 116, § 3º (outras fontes legais).",
+        "ordem": 13,
+    },
+    {
         "id": "SIMPLES",
         "sigla": "Simples",
         "nome": "Simples Nacional — ISS informado pelo banco arrecadador",
@@ -207,6 +255,7 @@ CONCEITOS = {
     "ITEM": "Parcela da composição (principal, multas, dívida ativa...)",
     "DEDUCAO": "Dedução da receita",
     "INFORMATIVO": "Valor informativo, não comparado",
+    "SEM_ADICIONAL": "Líquido de deduções, sem o adicional do FECOP (art. 82 do ADCT)",
 }
 
 PARCELAS = {
@@ -226,6 +275,7 @@ PARCELAS = {
     "FECOP_DEDUCAO_CONST": "Dedução constitucional do adicional",
     "LIQUIDO_FUNDEB": "Líquido após FUNDEB",
     "COTA_REPASSADA": "Cota-parte repassada aos municípios (lançada pelo estado)",
+    "COMPENSACAO": "Compensação financeira da LC 194/2022 (LC 201/2023) registrada em rubrica própria",
 }
 
 # Parcelas que somam o total (composição conhecida) e deduções.
@@ -335,6 +385,22 @@ _EVID_COTA = (
 )
 _EVID_ICMS = "ICMS estadual: o SIOPE coincide com o total da DCA em 75% dos estado-ano e o SIOPS em 65%. Base de 29/10/2026."
 _EVID_TCE = "Conceito informado linha a linha pela compilação dos tribunais."
+_COTA_DCA_COMPENSACAO = {
+    "COTA_COMPENSACAO": ("COMPENSACAO", "INFORMATIVO", "Planilha SICONFI, coluna COTA_COMPEN_FIN (compensação financeira "
+                         "da LC 194/2022 registrada em rubrica própria; usada no ajuste E4 do Modelo 3)"),
+}
+_PLANILHA_ESTADOS = "Simulação - efeitos dos erros LC 194 e fundos.xlsx"
+_COTA_SEFAZ = {"COTA_RECEBIDA_TOTAL": ("TOTAL", "BRUTO", f"{_PLANILHA_ESTADOS}, aba cota-parte, coluna 'inf Estados'")}
+_COTA_SEFAZ_2 = {"COTA_RECEBIDA_TOTAL": ("TOTAL", "BRUTO", f"{_PLANILHA_ESTADOS}, aba cota-parte, coluna 'inf Estados2'")}
+_COTA_BB = {"COTA_RECEBIDA_TOTAL": ("TOTAL", "BRUTO", f"{_PLANILHA_ESTADOS}, aba cota-parte, coluna 'inf BB'")}
+_ICMS_CONFAZ = {"ICMS_TOTAL": ("TOTAL", "SEM_ADICIONAL", f"{_PLANILHA_ESTADOS}, aba UFs, coluna Confaz (sem o FECOP)")}
+_EVID_ESTADOS = (
+    "Valores brutos: a razão mediana em relação à DCA bruta fica entre 0,997 e 1,003. Coincidência (até 1%) com alguma "
+    "base do ente: BB 93,4%, Sefaz 83,8%, Sefaz 2 74,6% (avaliação de 18/11/2026)."
+)
+_EVID_CONFAZ = (
+    "O Confaz não inclui o adicional do FECOP: em AL e RJ, coincide com a DCA sem o adicional. Avaliação de 18/11/2026."
+)
 
 MAPEAMENTOS_LEGADO: dict[tuple[str, str], tuple[str, str, str, str, str, str, str]] = {}
 
@@ -353,6 +419,11 @@ _registrar("SIOPE", "SIOPE", "COTA_ICMS_MUN", _COTA_SIOPE, _EVID_COTA, "HIPOTESE
 _registrar("SIOPS", "SIOPS", "COTA_ICMS_MUN", _COTA_SIOPS, _EVID_COTA, "HIPOTESE")
 _registrar("TCE", "TCE", "COTA_ICMS_MUN", _COTA_TCE, _EVID_TCE, "HIPOTESE")
 _registrar("SICONFI", "SICONFI_DCA", "ICMS_UF", _ICMS_DCA, _EVID_DCA, "HIPOTESE")
+_registrar("SICONFI", "SICONFI_DCA", "COTA_ICMS_MUN", _COTA_DCA_COMPENSACAO, _EVID_DCA, "HIPOTESE")
+_registrar("SEFAZ", "SEFAZ", "COTA_ICMS_MUN", _COTA_SEFAZ, _EVID_ESTADOS, "HIPOTESE")
+_registrar("SEFAZ_2", "SEFAZ_2", "COTA_ICMS_MUN", _COTA_SEFAZ_2, _EVID_ESTADOS, "HIPOTESE")
+_registrar("BB", "BB", "COTA_ICMS_MUN", _COTA_BB, _EVID_ESTADOS, "HIPOTESE")
+_registrar("CONFAZ", "CONFAZ", "ICMS_UF", _ICMS_CONFAZ, _EVID_CONFAZ, "HIPOTESE")
 _registrar("SIOPE", "SIOPE", "ICMS_UF", _ICMS_SIOPE, _EVID_ICMS, "HIPOTESE")
 _registrar("SIOPS", "SIOPS", "ICMS_UF", _ICMS_SIOPS, _EVID_ICMS, "HIPOTESE")
 

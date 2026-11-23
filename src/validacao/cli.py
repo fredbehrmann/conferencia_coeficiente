@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     pacote_cmd.add_argument("--sem-validar", action="store_true", help="Não executa a validação após importar")
     pacote_cmd.set_defaults(func=_importar_siconfi)
 
-    bases_cmd = subcomandos.add_parser("importar-bases", help="Importa as planilhas de layout fixo: DCA, SIOPS, SIOPE e TCE")
+    bases_cmd = subcomandos.add_parser("importar-bases", help="Importa as planilhas de layout fixo: DCA, SIOPS, SIOPE, TCE e a dos Estados e do BB")
     bases_cmd.add_argument("arquivos", nargs="*", type=Path,
                            help="Planilhas (padrão: as quatro com o nome usual na pasta de bases)")
     bases_cmd.add_argument("--sem-validar", action="store_true", help="Não executa a validação após importar")

@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from validacao.conferencia import consultas, exportacao, importacao
+from validacao.conferencia import consultas, exportacao, importacao, simulacao
 from validacao.conferencia import modelos as cf
 from validacao.conferencia.catalogo import (
     COMPONENTES as COMPONENTES_CATALOGO,
@@ -66,7 +66,7 @@ from validacao.modelos import Ente, Usuario
 PASTA = Path(__file__).resolve().parent
 PERFIS = contas.PERFIS
 UFS = ("AC AL AM AP BA CE DF ES GO MA MG MS MT PA PB PE PI PR RJ RN RO RR RS SC SE SP TO").split()
-COLUNAS_PADRAO = ["SICONFI_DCA", "SICONFI_RREO", "SICONFI_MSC", "SIOPE", "SIOPS", "TCE"]
+COLUNAS_PADRAO = ["SICONFI_DCA", "SICONFI_RREO", "SICONFI_MSC", "SIOPE", "SIOPS", "TCE", "SEFAZ", "BB", "CONFAZ"]
 ESTADOS = {"VALOR": "Valor", "ZERO": "Zero declarado", "AUSENTE": "Célula vazia", "INVALIDO": "Formato inválido",
            "NAO_APLICAVEL": "Não aplicável", "NAO_EXIGIVEL": "Não exigível"}
 COMPARABILIDADE = {
@@ -445,6 +445,36 @@ def criar_app(banco: Path | None = None) -> FastAPI:
             return pagina(request, "resultado.html", session, usuario, aba="resultado", filtros=filtros, resultado=dados,
                           resumo=resumo, componentes=componentes, declaracoes=declaracoes)
 
+    # ------------------------------------------------------------- simulador
+    @app.get("/simulador", response_class=HTMLResponse)
+    def simulador(request: Request):
+        filtros = simulacao.FiltrosSimulador.de_query(request.query_params)
+        with sessao() as session:
+            usuario = exigir(request, session)
+            dados = cache.obter(session, ("simulador",), lambda: simulacao.simular(session))
+            resultado_simulacao = simulacao.filtrar(dados, filtros)
+            componentes = list(
+                session.scalars(select(cf.Componente).where(cf.Componente.ativo.is_(True)).order_by(cf.Componente.ordem))
+            )
+            return pagina(
+                request, "simulador.html", session, usuario, aba="simulador", simulacao=dados,
+                resultado=resultado_simulacao, filtros=filtros, componentes=componentes,
+            )
+
+    @app.get("/simulador/exportar")
+    def simulador_exportar(request: Request):
+        filtros = simulacao.FiltrosSimulador.de_query(request.query_params)
+        with sessao() as session:
+            exigir(request, session)
+            dados = cache.obter(session, ("simulador",), lambda: simulacao.simular(session))
+            xlsx = request.query_params.get("formato") == "xlsx"
+            conteudo = (simulacao.exportar_xlsx if xlsx else simulacao.exportar_csv)(dados, filtros)
+            execucao = dados.get("execucao")
+        nome = f"simulacao-modelos-execucao-{execucao.id if execucao else 'sem-dados'}.{'xlsx' if xlsx else 'csv'}"
+        tipo = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if xlsx
+                else "text/csv; charset=utf-8")
+        return Response(conteudo, media_type=tipo, headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+
     @app.get("/resultado/exportar")
     def resultado_exportar(request: Request, formato: str = "csv"):
         filtros = consultas.Filtros.de_query(request.query_params)
@@ -509,12 +539,13 @@ def criar_app(banco: Path | None = None) -> FastAPI:
         situacao = []
         for fonte in ORDEM:
             layout = LAYOUTS[fonte]
-            ultimo = session.scalar(select(cf.Lote).where(cf.Lote.declaracao_id == layout["declaracao"],
+            declaracoes = layout.get("declaracoes") or (layout["declaracao"],)
+            ultimo = session.scalar(select(cf.Lote).where(cf.Lote.declaracao_id.in_(declaracoes),
                                                           cf.Lote.situacao == "CONCLUIDO",
                                                           cf.Lote.origem_tipo.in_(("ARQUIVO", "MIGRACAO")))
                                     .order_by(cf.Lote.id.desc()).limit(1))
             vigentes = session.scalar(select(func.count()).select_from(cf.Registro).where(
-                cf.Registro.declaracao_id == layout["declaracao"], cf.Registro.vigente.is_(True)))
+                cf.Registro.declaracao_id.in_(declaracoes), cf.Registro.vigente.is_(True)))
             situacao.append({"fonte": fonte, **layout, "lote": ultimo, "vigentes": vigentes or 0})
         return situacao
 
@@ -756,7 +787,7 @@ def criar_app(banco: Path | None = None) -> FastAPI:
 
     @app.post("/importar/bases")
     async def importar_bases(request: Request):
-        """Importa as planilhas de layout fixo (DCA, SIOPE, SIOPS, TCE) em segundo plano."""
+        """Importa as planilhas de layout fixo (DCA, SIOPE, SIOPS, TCE, Estados e BB) em segundo plano."""
         from validacao.conferencia import bases_fixas
 
         formulario = await request.form()

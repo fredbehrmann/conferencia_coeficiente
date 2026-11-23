@@ -17,8 +17,14 @@ CORES = {
     "TCE": "var(--serie-6)",
     "BALANCO": "var(--serie-7)",
     "SIMPLES": "var(--serie-8)",
+    # Estados e banco: o balanço e o Simples quase nunca aparecem com eles; o traço os distingue.
+    "SEFAZ": "var(--serie-7)",
+    "SEFAZ_2": "var(--serie-7)",
+    "BB": "var(--serie-8)",
+    "CONFAZ": "var(--serie-7)",
 }
-TRACOS = {"SICONFI_DCA": "", "SICONFI_RREO": "6 3", "SIOPE": "", "SIOPS": "2 3", "TCE": "8 3 2 3"}
+TRACOS = {"SICONFI_DCA": "", "SICONFI_RREO": "6 3", "SIOPE": "", "SIOPS": "2 3", "TCE": "8 3 2 3",
+          "SEFAZ": "4 2", "SEFAZ_2": "1 3", "BB": "4 2", "CONFAZ": "4 2"}
 
 
 def _escala(valor: float) -> str:

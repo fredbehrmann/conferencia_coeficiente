@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block titulo %}Simulador de metodologias{% endblock %}
+{% block conteudo %}
+{% if not simulacao.execucao %}
+<div class="bloco">Nenhuma validação executada. Execute a validação para simular os modelos.</div>
+{% else %}
+{% set r = simulacao.resumo %}
+<div class="cabeca-pagina">
+  <div>
+    <h2 style="font-size: 18px; margin: 0">Simulador comparativo de metodologias</h2>
+    <p class="sutil" style="margin: 2px 0 0">Os três modelos usam a mesma fotografia da validação nº {{ simulacao.execucao.id }}. A simulação é somente leitura: não registra nem altera decisões.</p>
+  </div>
+  <a class="botao" href="/simulador/exportar?{{ filtros.query() }}&formato=xlsx">Exportar consulta em Excel</a>
+  <a class="botao discreto" href="/simulador/exportar?{{ filtros.query() }}">Exportar consulta em CSV</a>
+</div>
+
+<div class="nota sim-aviso">
+  <b>Dois cenários de impacto.</b> O cenário <b>aprovado</b> aplica somente decisões automáticas e conserva o valor original nas pendências. O cenário <b>potencial</b> usa também os candidatos pendentes para dimensionar risco. A média é nominal, por componente e pelos exercícios exigíveis; não aplica a atualização monetária pendente P6. Estes números não são a apuração oficial.
+</div>
+
+<section class="indicadores grade" aria-label="Resumo da simulação">
+  <div class="indicador"><b>{{ r.casos|milhar }}</b><span>casos exigíveis · {{ r.entes|milhar }} entes</span></div>
+  <div class="indicador destaque"><b>{{ r.divergencias|milhar }}</b><span>casos em que os modelos divergem</span></div>
+  <div class="indicador"><b>{{ r.ajustes_degraus|milhar }}</b><span>valores alterados pelos degraus</span></div>
+  <div class="indicador"><b>{{ r.ajustes_evidencia|milhar }}</b><span>ajustes automáticos aprovados · evidência</span></div>
+  <div class="indicador"><b>{{ r.candidatos_evidencia|milhar }}</b><span>candidatos de ajuste · evidência</span></div>
+  <div class="indicador"><b>{{ r.automaticas_degraus|milhar }}</b><span>decisões automáticas · degraus</span></div>
+  <div class="indicador"><b>{{ r.pendentes_degraus|milhar }}</b><span>pendentes · degraus</span></div>
+  <div class="indicador"><b>{{ r.automaticas_evidencia|milhar }}</b><span>decisões automáticas · evidência</span></div>
+  <div class="indicador"><b>{{ r.visto_evidencia|milhar }}</b><span>trocas sujeitas a visto · evidência</span></div>
+  <div class="indicador"><b>{{ r.pendentes_evidencia|milhar }}</b><span>pendentes · evidência</span></div>
+  <div class="indicador"><b>{{ r.automaticas_funil|milhar }}</b><span>resolvidos · funil</span></div>
+  <div class="indicador"><b>{{ r.confirmacao_externa_funil|milhar }}</b><span>confirmados por fonte externa · funil</span></div>
+  <div class="indicador"><b>{{ r.pendentes_funil|milhar }}</b><span>pendentes · funil</span></div>
+  <div class="indicador"><b>{{ r.ajustes_funil|milhar }}</b><span>valores alterados · funil</span></div>
+</section>
+
+<div class="sim-modelos tres">
+  <article class="bloco sim-modelo degraus">
+    <div class="sim-modelo-topo"><h2>Modelo 1 · Degraus</h2><span class="hipotese">material</span></div>
+    <p>{{ simulacao.parametros.degraus }}</p>
+    <dl class="sim-numeros">
+      <div><dt>Receita média nacional</dt><dd>{{ r.total_degraus|reais2 }}</dd></div>
+      <div><dt>Variação contra a base</dt><dd class="{{ 'positivo' if r.total_degraus > r.total_original else 'negativo' if r.total_degraus < r.total_original }}">{{ (r.total_degraus - r.total_original)|reais2 }}</dd></div>
+      <div><dt>Municípios que ganham</dt><dd>{{ r.municipios_ganham_degraus|milhar }}</dd></div>
+      <div><dt>Municípios que perdem</dt><dd>{{ r.municipios_perdem_degraus|milhar }}</dd></div>
+    </dl>
+  </article>
+  <article class="bloco sim-modelo evidencia">
+    <div class="sim-modelo-topo"><h2>Modelo 2 · Evidência e impacto</h2><span class="hipotese">{{ simulacao.politica_evidencia }}</span></div>
+    <p>{{ simulacao.parametros.evidencia }}</p>
+    <dl class="sim-numeros">
+      <div><dt>Receita média · aprovado</dt><dd>{{ r.total_evidencia|reais2 }}</dd></div>
+      <div><dt>Variação aprovada</dt><dd class="{{ 'positivo' if r.total_evidencia > r.total_original else 'negativo' if r.total_evidencia < r.total_original }}">{{ (r.total_evidencia - r.total_original)|reais2 }}</dd></div>
+      <div><dt>Receita média · potencial</dt><dd>{{ r.total_evidencia_potencial|reais2 }}</dd></div>
+      <div><dt>Variação potencial</dt><dd class="{{ 'positivo' if r.total_evidencia_potencial > r.total_original else 'negativo' if r.total_evidencia_potencial < r.total_original }}">{{ (r.total_evidencia_potencial - r.total_original)|reais2 }}</dd></div>
+      <div><dt>Municípios que ganham</dt><dd>{{ r.municipios_ganham_evidencia|milhar }}</dd></div>
+      <div><dt>Municípios que perdem</dt><dd>{{ r.municipios_perdem_evidencia|milhar }}</dd></div>
+    </dl>
+  </article>
+  <article class="bloco sim-modelo funil">
+    <div class="sim-modelo-topo"><h2>Modelo 3 · Funil de validação externa</h2><span class="hipotese">Nota Técnica v1.24</span></div>
+    <p>{{ simulacao.parametros.funil }}</p>
+    <dl class="sim-numeros">
+      <div><dt>Receita média nacional</dt><dd>{{ r.total_funil|reais2 }}</dd></div>
+      <div><dt>Variação contra a base</dt><dd class="{{ 'positivo' if r.total_funil > r.total_original else 'negativo' if r.total_funil < r.total_original }}">{{ (r.total_funil - r.total_original)|reais2 }}</dd></div>
+      <div><dt>Municípios que ganham</dt><dd>{{ r.municipios_ganham_funil|milhar }}</dd></div>
+      <div><dt>Municípios que perdem</dt><dd>{{ r.municipios_perdem_funil|milhar }}</dd></div>
+    </dl>
+  </article>
+</div>
+
+<section class="bloco sim-funil">
+  <h2>Modelo 3 · casos resolvidos em cada etapa do funil</h2>
+  <p class="sutil">Cada caso para na primeira etapa cujo critério é atendido. Etapas 1 e 2 têm confirmação externa (cota-parte: Sefaz, BB e tribunal de contas; ISS: tribunal de contas); a Etapa 3 se apoia só nas declarações do próprio ente; a Etapa 4 adota a fonte externa sozinha. Pendentes conservam o valor original. Marcadores de verificação não alteram o valor: V1 {{ (r.duplicidades_funil.v1 or 0)|milhar }} (diferença > 10% para a Sefaz ou o TCE), V2 {{ (r.duplicidades_funil.v2 or 0)|milhar }} e V3 {{ (r.duplicidades_funil.v3 or 0)|milhar }} (participação na UF), V4 {{ r.duplicidades_funil.v4|milhar }} (duplicidade entre municípios), V5 {{ r.duplicidades_funil.v5|milhar }} (entre exercícios), V6 {{ (r.duplicidades_funil.v6 or 0)|milhar }} (razão típica) e V7 {{ (r.duplicidades_funil.v7 or 0)|milhar }} (salto na série do ISS).</p>
+  <table class="tabela-simples">
+    <thead><tr><th>Etapa</th><th class="num">Casos</th><th class="num">% dos casos</th><th class="num">% acumulado</th></tr></thead>
+    <tbody>
+    {% for etapa in r.etapas_funil %}
+      <tr class="{{ 'sim-funil-pendente' if etapa.regra == 'FP' }}"><td><span class="sim-regra">{{ etapa.regra }}</span> {{ etapa.rotulo }}</td><td class="num">{{ etapa.casos|milhar }}</td><td class="num">{{ etapa.pct|pct(1) }}</td><td class="num">{{ etapa.acumulado|pct(1) if etapa.acumulado is not none else '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if r.grupos_tce_liquido %}<p class="sutil">Tribunais com cota-parte publicada líquida do Fundeb, convertida ao bruto (÷ 0,8): {% for g in r.grupos_tce_liquido %}TCE-{{ g[0] }} {{ g[1] }}{{ ', ' if not loop.last else '.' }}{% endfor %}</p>{% endif %}
+</section>
+
+{% if r.conservacao and r.conservacao.original.uf_anos %}
+<section class="bloco sim-conservacao">
+  <h2>Conservação da cota-parte por UF</h2>
+  <p class="sutil">Soma das cotas municipais de cada UF e exercício comparada ao repasse declarado pelo Estado (DCA; na falta, SIOPS). Repasses estaduais implausíveis ficam de fora. Quanto mais UF-exercícios fecham dentro de ±2%, mais coerente é o conjunto de valores escolhidos.</p>
+  <table class="tabela-simples">
+    <thead><tr><th>Cenário</th><th class="num">UF-exercícios dentro de ±2%</th><th class="num">Desvio médio</th></tr></thead>
+    <tbody>
+    {% for chave, rotulo in [('original', 'Valor principal vigente'), ('degraus', 'Modelo 1 · Degraus'), ('evidencia', 'Modelo 2 · aprovado'), ('evidencia_potencial', 'Modelo 2 · potencial'), ('funil', 'Modelo 3 · Funil')] %}{% set c = r.conservacao[chave] %}
+      <tr><td>{{ rotulo }}</td><td class="num">{{ c.dentro_2pct }} de {{ c.uf_anos }}</td><td class="num">{{ c.desvio_medio|pct(2) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<details class="bloco sim-ranking">
+  <summary><b>Municípios que mais ganham ou perdem em cada cenário</b></summary>
+  <p class="sutil">Ordenação pela variação do coeficiente em relação ao valor principal vigente. Para o Modelo 2, o ranking usa o cenário aprovado; candidatos pendentes não alteram o coeficiente. A variação financeira da transição não é projetada porque o montante futuro ainda não integra a aplicação.</p>
+  <div class="sim-modelos">
+  {% for modelo, titulo in [('degraus', 'Degraus'), ('evidencia', 'Evidência e impacto'), ('funil', 'Funil de validação externa')] %}
+    <div>
+      <h3>{{ titulo }}</h3>
+      <div class="sim-rank-colunas">
+        <table class="tabela-simples"><thead><tr><th>Maiores ganhos</th><th class="num">Δ coef.</th><th class="num">Δ média</th></tr></thead><tbody>
+        {% for item in simulacao.rankings[modelo].ganhos_top %}<tr><td><a href="/simulador?diferenca=&q={{ item.id_ente }}">{{ item.nome }}</a> <span class="sutil">{{ item.uf }}</span></td><td class="num positivo">{{ item.diferenca_coeficiente|pcts(6) }}</td><td class="num positivo">{{ item.diferenca_receita_media|reais2 }}</td></tr>
+        {% else %}<tr><td colspan="3" class="sutil">Nenhum ganho.</td></tr>{% endfor %}</tbody></table>
+        <table class="tabela-simples"><thead><tr><th>Maiores perdas</th><th class="num">Δ coef.</th><th class="num">Δ média</th></tr></thead><tbody>
+        {% for item in simulacao.rankings[modelo].perdas_top %}<tr><td><a href="/simulador?diferenca=&q={{ item.id_ente }}">{{ item.nome }}</a> <span class="sutil">{{ item.uf }}</span></td><td class="num negativo">{{ item.diferenca_coeficiente|pcts(6) }}</td><td class="num negativo">{{ item.diferenca_receita_media|reais2 }}</td></tr>
+        {% else %}<tr><td colspan="3" class="sutil">Nenhuma perda.</td></tr>{% endfor %}</tbody></table>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+</details>
+
+<form class="filtros" method="get" action="/simulador" aria-label="Filtros da simulação">
+  <div class="filtros-linha">
+    <div class="campo"><label for="s-q">Ente ou código IBGE</label><input id="s-q" type="search" name="q" data-autocompletar-ente autocomplete="off" value="{{ filtros.q }}" placeholder="Digite o nome ou código"></div>
+    <div class="campo"><label for="s-uf">UF</label><select id="s-uf" name="uf"><option value="">Todas</option>{% for uf in UFS %}<option {{ 'selected' if filtros.uf == uf }}>{{ uf }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="s-comp">Componente</label><select id="s-comp" name="componente"><option value="">Todos</option>{% for c in componentes %}<option value="{{ c.id }}" {{ 'selected' if filtros.componente == c.id }}>{{ c.nome }}</option>{% endfor %}</select></div>
+    <div class="campo"><label for="s-status">Decisão</label><select id="s-status" name="status"><option value="">Todas</option><option value="degraus_AUTOMATICA" {{ 'selected' if filtros.status == 'degraus_AUTOMATICA' }}>Degraus · automática</option><option value="degraus_PENDENTE" {{ 'selected' if filtros.status == 'degraus_PENDENTE' }}>Degraus · pendente</option><option value="evidencia_AUTOMATICA" {{ 'selected' if filtros.status == 'evidencia_AUTOMATICA' }}>Evidência · automática</option><option value="evidencia_VISTO" {{ 'selected' if filtros.status == 'evidencia_VISTO' }}>Evidência · sujeita a visto</option><option value="evidencia_PENDENTE" {{ 'selected' if filtros.status == 'evidencia_PENDENTE' }}>Evidência · pendente</option><option value="funil_AUTOMATICA" {{ 'selected' if filtros.status == 'funil_AUTOMATICA' }}>Funil · resolvido</option><option value="funil_PENDENTE" {{ 'selected' if filtros.status == 'funil_PENDENTE' }}>Funil · pendente</option></select></div>
+    <div class="campo"><label for="s-dif">Casos exibidos</label><select id="s-dif" name="diferenca"><option value="modelos" {{ 'selected' if filtros.diferenca == 'modelos' }}>Modelos divergem</option><option value="ajuste" {{ 'selected' if filtros.diferenca == 'ajuste' }}>Algum modelo ajusta</option><option value="" {{ 'selected' if not filtros.diferenca }}>Toda a base</option></select></div>
+    <div class="campo"><label for="s-ordem">Ordenar por</label><select id="s-ordem" name="ordem"><option value="impacto" {{ 'selected' if filtros.ordem == 'impacto' }}>Impacto no ente</option><option value="diferenca" {{ 'selected' if filtros.ordem == 'diferenca' }}>Diferença entre modelos</option><option value="ente" {{ 'selected' if filtros.ordem == 'ente' }}>Ente e exercício</option></select></div>
+    <button class="primario" type="submit">Comparar</button><a class="botao discreto" href="/simulador">Limpar</a>
+  </div>
+  <div class="filtros-linha" style="margin-top: 8px"><span class="sutil">{{ resultado.total|milhar }} casos na consulta.</span><a class="botao pequeno" href="/simulador/exportar?{{ filtros.query() }}&formato=xlsx">Excel desta consulta</a><a class="botao pequeno discreto" href="/simulador/exportar?{{ filtros.query() }}">CSV desta consulta</a><a class="botao pequeno discreto" href="/simulador/exportar?diferenca=&ordem=ente&formato=xlsx">Excel de toda a base</a><a class="botao pequeno discreto" href="/simulador/exportar?diferenca=&ordem=ente">CSV de toda a base</a></div>
+</form>
+
+<div class="tabela-quadro sim-quadro">
+<table class="tabela-simples sim-tabela">
+  <thead><tr><th>Caso</th><th class="num">Valor original</th><th>Modelo 1 · Degraus</th><th>Modelo 2 · Evidência e impacto</th><th>Modelo 3 · Funil</th><th class="num">Diferença entre modelos</th><th>Impacto no ente</th><th></th></tr></thead>
+  <tbody>
+  {% for linha in resultado.linhas %}{% set c = linha.caso %}{% set d = linha.degraus %}{% set e = linha.evidencia %}{% set f = linha.funil %}
+    <tr class="{{ 'sim-diverge' if linha.modelos_divergem }}">
+      <td><b>{{ c.nome_ente }}</b> <span class="sutil">{{ c.uf }}</span><div class="valor-meta"><span class="mono">{{ c.id_ente }}</span> · {{ c.exercicio }} · {{ ROTULO_CURTO.get(c.componente, c.componente) }} · confiança {{ c.confianca if c.confianca is not none else 'n/a' }}</div></td>
+      <td class="num">{{ c.valor_principal|reais2 if c.valor_principal is not none else '—' }}<div class="valor-meta">{{ c.principal|sigla if c.principal else c.estado_principal }}</div></td>
+      {% for m in [d, e, f] %}
+      <td class="sim-celula-modelo">
+        <div class="sim-valor"><b>{{ m.valor_proposto|reais2 if m.valor_proposto is not none else '—' }}</b><span class="sim-status {{ m.status|lower }}">{{ 'sujeita a visto' if m.status == 'VISTO' else m.status|lower }}</span></div>
+        <div><span class="sim-regra">{{ m.regra }}</span> {{ m.fonte }}</div>
+        {% if m is sameas e %}<div class="valor-meta"><b>Cenário aprovado:</b> {{ m.valor_aprovado|reais2 }}{% if m.status in ('PENDENTE', 'VISTO') %} · original conservado{% endif %}</div>
+        {% if m.peso_dca or m.peso_alternativa %}<div class="valor-meta sim-pesos">Evidência: a favor da DCA <b>{{ '%.2f'|format(m.peso_dca)|replace('.', ',') }}</b> · contra <b>{{ '%.2f'|format(m.peso_alternativa)|replace('.', ',') }}</b></div>{% endif %}{% endif %}
+        {% if m is sameas f %}<div class="valor-meta">{{ m.etapa }}{% if m.confirmacao_externa %} · confirmado por fonte externa{% endif %}</div>{% for marca in m.marcadores %}<div class="valor-meta sim-marcador">{{ marca }}</div>{% endfor %}{% endif %}
+        {% if m.formula %}<div class="valor-meta mono">{{ m.formula }}</div>{% endif %}
+        <details><summary>Justificativa</summary><p>{{ m.justificativa }}</p></details>
+      </td>
+      {% endfor %}
+      <td class="num"><span class="{{ 'positivo' if linha.diferenca_modelos > 0 else 'negativo' if linha.diferenca_modelos < 0 }}">{{ linha.diferenca_modelos|reais2 }}</span><div class="valor-meta">aprovado − degraus</div><span class="{{ 'positivo' if linha.diferenca_modelos_potencial > 0 else 'negativo' if linha.diferenca_modelos_potencial < 0 }}">{{ linha.diferenca_modelos_potencial|reais2 }}</span><div class="valor-meta">potencial − degraus</div><span class="{{ 'positivo' if linha.diferenca_funil_degraus > 0 else 'negativo' if linha.diferenca_funil_degraus < 0 }}">{{ linha.diferenca_funil_degraus|reais2 }}</span><div class="valor-meta">funil − degraus</div><span class="{{ 'positivo' if linha.diferenca_funil_evidencia > 0 else 'negativo' if linha.diferenca_funil_evidencia < 0 }}">{{ linha.diferenca_funil_evidencia|reais2 }}</span><div class="valor-meta">funil − aprovado</div></td>
+      <td class="sim-impacto">
+        <div><b>Degraus</b> Δ média <span class="{{ 'positivo' if d.diferenca_receita_media > 0 else 'negativo' if d.diferenca_receita_media < 0 }}">{{ d.diferenca_receita_media|reais2 }}</span><br>Δ coef. <span class="{{ 'positivo' if d.diferenca_coeficiente > 0 else 'negativo' if d.diferenca_coeficiente < 0 }}">{{ d.diferenca_coeficiente|pcts(6) }}</span></div>
+        <div><b>Evidência · aprovado</b> Δ média <span class="{{ 'positivo' if e.diferenca_receita_media > 0 else 'negativo' if e.diferenca_receita_media < 0 }}">{{ e.diferenca_receita_media|reais2 }}</span><br>Δ coef. <span class="{{ 'positivo' if e.diferenca_coeficiente > 0 else 'negativo' if e.diferenca_coeficiente < 0 }}">{{ e.diferenca_coeficiente|pcts(6) }}</span><br><b>Potencial</b> Δ média <span class="{{ 'positivo' if e.diferenca_receita_media_potencial > 0 else 'negativo' if e.diferenca_receita_media_potencial < 0 }}">{{ e.diferenca_receita_media_potencial|reais2 }}</span><br>Δ coef. <span class="{{ 'positivo' if e.diferenca_coeficiente_potencial > 0 else 'negativo' if e.diferenca_coeficiente_potencial < 0 }}">{{ e.diferenca_coeficiente_potencial|pcts(6) }}</span></div>
+        <div><b>Funil</b> Δ média <span class="{{ 'positivo' if f.diferenca_receita_media > 0 else 'negativo' if f.diferenca_receita_media < 0 }}">{{ f.diferenca_receita_media|reais2 }}</span><br>Δ coef. <span class="{{ 'positivo' if f.diferenca_coeficiente > 0 else 'negativo' if f.diferenca_coeficiente < 0 }}">{{ f.diferenca_coeficiente|pcts(6) }}</span></div>
+      </td>
+      <td><a class="botao pequeno" href="/caso/{{ c.id }}">Abrir caso</a></td>
+    </tr>
+  {% else %}<tr><td colspan="8" class="sutil" style="padding: 20px">Nenhum caso com estes filtros.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="paginacao"><span>{{ resultado.total|milhar }} casos · página {{ filtros.pagina }} de {{ resultado.paginas }}</span>{% if filtros.pagina > 1 %}<a class="botao pequeno" href="/simulador?{{ filtros.query(pagina=filtros.pagina - 1) }}">← Anterior</a>{% endif %}{% if filtros.pagina < resultado.paginas %}<a class="botao pequeno" href="/simulador?{{ filtros.query(pagina=filtros.pagina + 1) }}">Próxima →</a>{% endif %}</div>
+
+<section class="bloco sim-metodologia">
+  <h2>Leitura dos resultados</h2>
+  <div class="sim-modelos">
+    <div><h3>Degraus</h3><ul><li>D1A: DCA confirmada por ao menos uma base.</li><li>D1B/D1C: DCA prevalece sem maioria ou sem contraste.</li><li>D2A/D2B: outra fonte por ausência/zero ou maioria contra a DCA.</li><li>D3: estimativa por exercício vizinho e variação nacional.</li></ul></div>
+    <div><h3>Evidência e impacto · {{ simulacao.politica_evidencia }}</h3><ul>
+      <li><b>Pesos de independência:</b> TCE, BB e Sefaz 1,0; SIOPE e SIOPS juntos 1,25 (um só 0,75), por serem declarados pelo próprio ente; RREO e Confaz 0,5; MSC 0,25; conservação da UF 0,5. Diferença explicada por parcela declarada confirma com metade do peso.</li>
+      <li>E1A: DCA confirmada com peso ≥ 2,0. E1B: peso ≥ 1,5 e maior que o contrário, ou ≥ 1,0 com folga de 0,5 (o RREO desempata o perfil D). E1C: divergência imaterial (≤ 0,1% da receita média do ente). E1D: diferença explicada por parcela, ou até 10% sem evidência forte contra (presumido conceito).</li>
+      <li>E2A/E2B: DCA ausente ou zerada, alternativa com peso ≥ 1,25 (RREO quando confirmado). E2D: troca da DCA com peso ≥ 2,0 e maior que o dela (1,75 se nada a confirma), qualquer que seja o tamanho da diferença.</li>
+      <li><b>Visto:</b> troca que altera ≥ 5% da receita média do ente, ≥ 0,001 p.p. do total nacional, ou de Estado/DF. Proposta, mas fora do cenário aprovado até a confirmação.</li>
+      <li><b>Impedimentos da manutenção automática:</b> pico ou queda isolada na série (≥ 3× e ≥ R$ 1 mi), escala, repetição, valor negativo; ICMS estadual sem o RREO concordante; valor idêntico confirmado em mais de um município (cópia).</li>
+      <li><b>Cota-parte do ICMS bruta (P12):</b> a retenção de 20% do FUNDEB não reduz a cota-parte. Fonte declarada líquida do FUNDEB (= 80% do bruto) é convertida para o bruto antes da comparação e a justificativa mostra os dois valores. E2E: DCA declarada líquida, trocada pelo valor bruto das demais fontes.</li>
+      <li>E2C, E3, E4 e E5 (evidências fortes em conflito) ficam pendentes.</li>
+    </ul></div>
+    <div><h3>Funil de validação externa</h3><ul>
+      <li><b>F1A:</b> DCA coincide (± R$ 10,00) com a fonte externa. <b>F1B:</b> coincide depois de corrigido um erro identificável (cota-parte: Fundeb líquido ÷ 0,8, Fundeb somado ÷ 1,2, unidade; ISS: deduções não abatidas, composição incompleta, unidade); adota a fonte externa. Na cota-parte, DCA + compensação da LC 194 registrada à parte = fonte (E4b) valida a DCA.</li>
+      <li><b>F2A:</b> RREO, SIOPS ou SIOPE, nessa ordem, coincide com a fonte externa; adota o demonstrativo. <b>F2B:</b> o demonstrativo coincide depois de corrigido; adota a fonte externa.</li>
+      <li><b>F3A:</b> DCA igual a dois demonstrativos que coincidem entre si (sem DCA, dois demonstrativos iguais), sem confirmação externa. <b>F3B:</b> a mesma concordância depois de corrigido um dos valores.</li>
+      <li><b>F4:</b> fonte externa sozinha, na ordem Sefaz, BB e TCE. <b>FP:</b> pendente, sem nenhum critério atendido.</li>
+      <li><b>Fontes:</b> cota-parte validada pela Sefaz (1ª extração), pelo BB e pelo tribunal de contas, nessa ordem; ISS, só pelo tribunal. O grupo do tribunal publicado líquido do Fundeb é detectado pela razão mediana tribunal ÷ Sefaz entre 0,79 e 0,83 (sem Sefaz no grupo, ÷ SIOPS). Verificações V1 a V7 aplicadas como marcadores. Ainda não aplicada: a dedução da compensação incluída no valor (art. X+7), que depende da informação dos Estados.</li>
+    </ul></div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

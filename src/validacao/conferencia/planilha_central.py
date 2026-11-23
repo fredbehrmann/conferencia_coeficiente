@@ -36,7 +36,7 @@ from validacao.conferencia.regras import GRAVIDADES, GRAVIDADE_POR_NOME, REGRAS
 from validacao.modelos import Ente
 
 ANOS = list(range(2019, 2026))
-FONTES = ["SICONFI_DCA", "SICONFI_RREO", "SICONFI_MSC", "SIOPE", "SIOPS", "TCE"]
+FONTES = ["SICONFI_DCA", "SICONFI_RREO", "SICONFI_MSC", "SIOPE", "SIOPS", "TCE", "SEFAZ", "SEFAZ_2", "BB", "CONFAZ"]
 SIGLA = {d["id"]: d["sigla"] for d in DECLARACOES}
 NOME_FONTE = {d["id"]: d["nome"] for d in DECLARACOES}
 NOME_COMP = {c["id"]: c["nome"] for c in COMPONENTES}
@@ -87,7 +87,7 @@ EXPLICA_DIAGNOSTICO = {
 CORES_NIVEL = {5: ("0F4A1A", "FFFFFF"), 4: ("2E7D32", "FFFFFF"), 3: ("F2C94C", "3D2E00"), 2: ("F08C00", "2B1700"),
                1: ("C62828", "FFFFFF"), 0: ("6B0F0F", "FFFFFF"), None: ("E7E6E1", "555555")}
 CRITERIO_NIVEL = {
-    5: "A DCA coincide com 2 ou mais fontes independentes (SIOPE, SIOPS, TCE), nenhuma independente diverge e não há alerta de repetição ou de escala sobre a própria DCA.",
+    5: "A DCA coincide com 2 ou mais fontes independentes (SIOPE, SIOPS, TCE, Sefaz, BB, Confaz), nenhuma independente diverge e não há alerta de repetição ou de escala sobre a própria DCA.",
     4: "A DCA coincide com 2 ou mais independentes, mas uma terceira diverge; ou seria nível 5, mas há alerta de repetição/escala sobre a DCA. O ICMS estadual fica limitado a este nível.",
     3: "A DCA coincide com 1 independente e nenhuma diverge; ou falta a DCA e o RREO é confirmado por 1 independente; ou, na cota-parte, as independentes valem DCA ÷ 0,8 (DCA líquida de FUNDEB — depende da pendência P12).",
     2: "A DCA coincide com 1 independente e outra diverge; ou só coincide com RREO/MSC (mesmo declarante); ou não há outra fonte comparável; ou falta a DCA e o RREO não tem confirmação; ou faltam DCA e RREO, mas 2+ independentes concordam entre si.",
@@ -105,7 +105,7 @@ SAIDA_REGRA = {
     "AUS": "Indica que a fonte principal não tem valor e quais fontes têm.",
     "INS": "Quantas fontes independentes comparáveis existem e o mínimo exigido.",
     "DSI": "Valor do RREO ou da MSC, valor da DCA, diferença em R$ e % (fonte − referência).",
-    "DAX": "Valor da base auxiliar (SIOPE, SIOPS, TCE), valor de referência, diferença em R$ e %; gravidade alta acima de 20%.",
+    "DAX": "Valor da base auxiliar (SIOPE, SIOPS, TCE, Sefaz, BB, Confaz), valor de referência, diferença em R$ e %; gravidade alta acima de 20%.",
     "DUP": "Campo repetido no mesmo lote, com os registros envolvidos.",
     "ZER": "Fonte que declara zero e as fontes que informam valor positivo.",
     "NEG": "Fonte, campo e valor negativo encontrado.",
@@ -128,7 +128,7 @@ F_TITULO = Font(name=ARIAL, size=14, bold=True)
 F_CAB = Font(name=ARIAL, size=10, bold=True, color="FFFFFF")
 F_SUTIL = Font(name=ARIAL, size=9, color="666666")
 FILL_CAB = PatternFill("solid", fgColor="1F3A5F")
-FILL_GRUPO = {f: PatternFill("solid", fgColor=c) for f, c in zip(FONTES, ["DCE6F2", "E2EFDA", "EDE7F6", "FFF2CC", "FCE4D6", "E7E6E6"])}
+FILL_GRUPO = {f: PatternFill("solid", fgColor=c) for f, c in zip(FONTES, ["DCE6F2", "E2EFDA", "EDE7F6", "FFF2CC", "FCE4D6", "E7E6E6", "DDEBF7", "F2F2F2", "FFF8E1", "E8F5E9"])}
 FILL_AUSENTE = PatternFill("solid", fgColor="FDECEA")
 FILL_ZERO = PatternFill("solid", fgColor="FEF3E2")
 FILL_REF = PatternFill("solid", fgColor="E8F0FC")
@@ -410,7 +410,7 @@ def gerar(engine, destino: Path, progresso=None) -> dict:
         for letra, largura in zip("ABCDEFG", (8, 16, 80, 40, 12, 10, 4)):
             wn.column_dimensions[letra].width = largura
         wn.append([_celula(wn, "Coluna Análise — escala de confiança no valor principal", F_TITULO)])
-        wn.append([_celula(wn, "Pergunta respondida: o valor principal deste caso é confiável para entrar na apuração? Fontes independentes: SIOPE, SIOPS e TCE. RREO e MSC são do mesmo declarante da DCA (SICONFI) e reforçam, mas não bastam sozinhos. 'Coincide' = diferença até 1% ou até R$ 1.000. A decisão do analista não altera o nível.", F_SUTIL, alinhamento=QUEBRA)])
+        wn.append([_celula(wn, "Pergunta respondida: o valor principal deste caso é confiável para entrar na apuração? Fontes independentes: SIOPE, SIOPS, TCE, Sefaz, BB e Confaz. RREO e MSC são do mesmo declarante da DCA (SICONFI) e reforçam, mas não bastam sozinhos. 'Coincide' = diferença até 1% ou até R$ 1.000. A decisão do analista não altera o nível.", F_SUTIL, alinhamento=QUEBRA)])
         wn.append([])
         wn.append([_celula(wn, t, F_CAB, FILL_CAB, alinhamento=QUEBRA) for t in ("Nível", "Nome", "Quando o caso recebe o nível", "Como usar", "Casos", "%")])
         for n, nivel in enumerate([5, 4, 3, 2, 1, 0, None], start=5):
@@ -441,7 +441,7 @@ def gerar(engine, destino: Path, progresso=None) -> dict:
             for chave, texto in itens:
                 wd.append([_celula(wd, chave, F_NEGRITO, alinhamento=TOPO), _celula(wd, texto, alinhamento=QUEBRA)])
 
-        bloco("Fontes", [(f"{SIGLA[f]}", f"{NOME_FONTE[f]}" + (" — mesmo declarante da DCA (não conta como validação independente)." if f in ("SICONFI_RREO", "SICONFI_MSC") else (" — fonte principal (referência)." if f == "SICONFI_DCA" else " — fonte independente."))) for f in FONTES])
+        bloco("Fontes", [(f"{SIGLA[f]}", f"{NOME_FONTE[f]}" + (" — mesmo declarante da DCA (não conta como validação independente)." if f in ("SICONFI_RREO", "SICONFI_MSC") else " — 2ª extração das Sefaz: conferida, mas não conta como fonte independente." if f == "SEFAZ_2" else (" — fonte principal (referência)." if f == "SICONFI_DCA" else " — fonte independente."))) for f in FONTES])
         bloco("Componentes", [(ROTULO_CURTO[c], f"{NOME_COMP[c]}") for c in componentes])
         bloco("Situação da fonte (colunas '— situação')", list(EXPLICA_SITUACAO_FONTE.items()))
         bloco("Comparabilidade", list(EXPLICA_COMPARABILIDADE.items()))
@@ -531,7 +531,7 @@ def gerar(engine, destino: Path, progresso=None) -> dict:
         itens = [
             ("O que é", "Uma linha por ente × exercício × componente, com o valor de cada fonte, o que está ausente, os alertas, o nível de confiança (Análise), o valor proposto e a decisão do analista. É o mesmo conteúdo da central de inconsistências da aplicação, sem filtro."),
             ("Universo", f"{total:,} casos: todos os municípios (ISS e cota-parte do ICMS), os 26 estados (ICMS) e o Distrito Federal (ISS e ICMS), exercícios 2019 a 2025. Entes fora do universo no exercício foram omitidos. Contribuições a fundos estaduais não aparecem: aguardam a informação dos Estados ao CGIBS.".replace(",", ".")),
-            ("Fontes", "DCA (referência), RREO e MSC (SICONFI, mesmo declarante); SIOPE, SIOPS e TCE (independentes). Detalhes na aba Domínios."),
+            ("Fontes", "DCA (referência), RREO e MSC (SICONFI, mesmo declarante); SIOPE, SIOPS, TCE, Sefaz, BB e Confaz (independentes; a 2ª extração das Sefaz é só conferida). Detalhes na aba Domínios."),
             ("Ausências", "Para cada fonte, a coluna '— situação' diz se há valor, zero, registro sem valor, sem registro ou consulta com erro. A coluna 'Fontes ausentes' resume o que falta no caso. Células em vermelho claro indicam ausência."),
             ("Como filtrar", "A aba Central tem filtro em todas as colunas. Exemplos: Análise (nível) ≤ 2 para os casos a analisar; 'Alertas (códigos)' contém DAX; 'Fontes ausentes' contém DCA."),
             ("Abas", "Resumo: contagens por componente (fórmulas sobre a Central). Alertas: o que cada regra verifica e retorna. Análise: os níveis de confiança 0 a 5. Domínios: significado de cada código. Central: os dados."),

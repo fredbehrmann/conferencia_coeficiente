@@ -1,4 +1,5 @@
-"""Importação das bases com layout fixo: DCA (SICONFI), SIOPE, SIOPS e Tribunais de Contas.
+"""Importação das bases com layout fixo: DCA (SICONFI), SIOPE, SIOPS, Tribunais de Contas e a planilha dos
+Estados e do Banco do Brasil (Sefaz, Sefaz 2, BB e Confaz).
 
 São as mesmas planilhas que alimentaram a versão 1. A leitura segue as mesmas regras da
 carga original (colunas, campos e esferas), de modo que reimportar uma planilha já
@@ -9,8 +10,12 @@ migrada não gera nada novo, e uma planilha atualizada gera só as diferenças:
 - valor inexistente até então: registro novo.
 
 O tipo da planilha é reconhecido pelas abas e cabeçalhos, não pelo nome do arquivo.
-Células vazias não geram registro (como na carga original); compensações financeiras,
-fora do art. 115, são ignoradas.
+Células vazias não geram registro (como na carga original). Das compensações financeiras, fora do
+art. 115, só a compensação da LC 194/2022 registrada pelo Município (COTA_COMPEN_FIN) é guardada, como
+parcela informativa da cota-parte: o Modelo 3 a usa no ajuste E4 (Nota Técnica, Etapa 1b).
+
+Quando a leitura de um layout passa a reconhecer novos campos (versão de leitura maior), o mesmo arquivo
+pode ser importado de novo: só os valores novos são gravados.
 """
 
 from __future__ import annotations
@@ -48,7 +53,8 @@ from validacao.modelos import Ente
 LAYOUTS = {
     "SICONFI": {
         "declaracao": "SICONFI_DCA", "nome": "DCA — SICONFI", "arquivo": "SICONFI_DCA_Receitas_2019_2025.xlsx",
-        "descricao": "Abas SICONFI (totais) e SICONFI_BRUTO (bruto e deduções)",
+        "descricao": "Abas SICONFI (totais e compensação da LC 194) e SICONFI_BRUTO (bruto e deduções)",
+        "versao_leitura": 2,  # 2: passa a ler a compensação financeira (COTA_COMPEN_FIN) dos Municípios
     },
     "SIOPE": {
         "declaracao": "SIOPE", "nome": "SIOPE", "arquivo": "Dados SIOPE - ICMS e ISS.xlsx",
@@ -62,8 +68,21 @@ LAYOUTS = {
         "declaracao": "TCE", "nome": "Tribunais de Contas", "arquivo": "TCE Arrecadacao Municipios - 2019_2025.xlsx",
         "descricao": "Aba Base detalhada (abertura do ISS e da cota-parte, com a natureza do valor)",
     },
+    "ESTADOS": {
+        "declaracao": "SEFAZ", "nome": "Estados, Banco do Brasil e Confaz",
+        "arquivo": "Simulação - efeitos dos erros LC 194 e fundos.xlsx",
+        "descricao": "Aba cota-parte (colunas inf Estados, inf Estados2 e inf BB) e aba UFs (coluna Confaz)",
+        "declaracoes": ("SEFAZ", "SEFAZ_2", "BB", "CONFAZ"),
+    },
 }
-ORDEM = ("SICONFI", "SIOPS", "SIOPE", "TCE")  # a DCA primeiro: ela completa o cadastro de entes
+ORDEM = ("SICONFI", "SIOPS", "SIOPE", "TCE", "ESTADOS")
+# Colunas da planilha dos Estados: (aba, coluna) -> (declaração, campo)
+COLUNAS_ESTADOS = {
+    ("cota-parte", "inf Estados"): ("SEFAZ", "COTA_RECEBIDA_TOTAL"),
+    ("cota-parte", "inf Estados2"): ("SEFAZ_2", "COTA_RECEBIDA_TOTAL"),
+    ("cota-parte", "inf BB"): ("BB", "COTA_RECEBIDA_TOTAL"),
+    ("UFs", "Confaz"): ("CONFAZ", "ICMS_TOTAL"),
+}  # a DCA primeiro: ela completa o cadastro de entes
 
 
 class LayoutDesconhecido(ValueError):
@@ -107,6 +126,8 @@ def identificar(nome_arquivo: str, conteudo: bytes) -> str:
         raise LayoutDesconhecido(f"{nome_arquivo}: não foi possível abrir a planilha ({erro}).") from erro
     if {"SICONFI", "SICONFI_BRUTO"} <= set(abas):
         return "SICONFI"
+    if {"cota-parte", "UFs"} <= set(abas) and "inf Estados" in abas["cota-parte"] and "Confaz" in abas["UFs"]:
+        return "ESTADOS"
     if "Base detalhada" in abas and "ISS" in abas:
         return "TCE"
     if {"Municipios", "Estados"} <= set(abas):
@@ -117,7 +138,8 @@ def identificar(nome_arquivo: str, conteudo: bytes) -> str:
             return "SIOPS"
     raise LayoutDesconhecido(
         f"{nome_arquivo}: layout não reconhecido. Esperado: DCA (abas SICONFI e SICONFI_BRUTO), SIOPE ou SIOPS "
-        "(abas Municipios e Estados) ou TCE (aba Base detalhada). Para outros arquivos use a importação avulsa."
+        "(abas Municipios e Estados), TCE (aba Base detalhada) ou a planilha dos Estados e do BB (abas cota-parte e UFs). "
+        "Para outros arquivos use a importação avulsa."
     )
 
 
@@ -215,6 +237,13 @@ def ler_siconfi(session: Session, conteudo: bytes) -> Leitura:
             for origem, campo in colunas.items():
                 _acrescentar(leitura, id_ente, ano, campo, _numero(registro.get(origem)), None, origem, aba,
                              deslocamento + 2, liberados)
+            if aba == "SICONFI" and esfera == "MUNICIPIO" and "COTA_COMPEN_FIN" in quadro.columns:
+                valor = _numero(registro.get("COTA_COMPEN_FIN"))
+                if valor is not None:
+                    leitura.valores[(id_ente, ano, "COTA_COMPENSACAO")] = {
+                        "valor": valor, "natureza": None, "coluna": "COTA_COMPEN_FIN", "aba": aba,
+                        "linha": deslocamento + 2, "componente": "COTA_ICMS_MUN",
+                    }
     return leitura
 
 
@@ -307,13 +336,71 @@ def _data_leia_me(conteudo: bytes) -> datetime | None:
     return None
 
 
+def ler_estados(session: Session, conteudo: bytes) -> dict[str, Leitura]:
+    """Planilha dos Estados e do BB: uma leitura por declaração (Sefaz, Sefaz 2, BB e Confaz).
+
+    Célula com fórmula não é informação da fonte (ex.: 'inf Estados' de Cuiabá/2023 = cópia da DCA) e é recusada.
+    Zero é gravado como zero: não valida nenhum valor (Nota Técnica, item 3.1)."""
+    from openpyxl import load_workbook
+
+    leituras = {d: Leitura(d) for d in LAYOUTS["ESTADOS"]["declaracoes"]}
+    valores = load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
+    formulas = load_workbook(io.BytesIO(conteudo), read_only=True)
+    codigos = _Codigos(session, "ESTADOS")
+    try:
+        for aba in ("cota-parte", "UFs"):
+            linhas_v = valores[aba].iter_rows(values_only=True)
+            linhas_f = formulas[aba].iter_rows(values_only=True)
+            cabecalho = [str(c).strip() if c is not None else "" for c in next(linhas_v)]
+            next(linhas_f)
+            indice = {nome: i for i, nome in enumerate(cabecalho)}
+            col_codigo = indice.get("cod_ibge7" if aba == "cota-parte" else "cod_ibge")
+            col_ano, col_nome = indice.get("ano"), indice.get("Nome" if aba == "cota-parte" else "UF")
+            if col_codigo is None or col_ano is None:
+                raise LayoutDesconhecido(f"Aba {aba} sem as colunas de código IBGE e ano.")
+            colunas = [(indice[c], d, campo, c) for (a, c), (d, campo) in COLUNAS_ESTADOS.items() if a == aba and c in indice]
+            for deslocamento, (linha, linha_f) in enumerate(zip(linhas_v, linhas_f)):
+                numero_linha = deslocamento + 2
+                codigo, ano = _inteiro(linha[col_codigo]), _inteiro(linha[col_ano])
+                if codigo is None or ano is None:
+                    continue
+                id_ente = codigos.id_ente(codigo, _texto(linha[col_nome]) if col_nome is not None else None)
+                if id_ente is None:
+                    for d in {d for _i, d, _c, _n in colunas}:
+                        leituras[d].ocorrencias.append({"linha": numero_linha, "coluna": cabecalho[col_codigo],
+                                                        "valor": str(codigo), "erro": f"Código sem ente no cadastro (aba {aba})"})
+                    continue
+                liberados = permitidos(codigos.esferas[id_ente])
+                for i, declaracao, campo, nome_coluna in colunas:
+                    leitura = leituras[declaracao]
+                    bruto_f = linha_f[i] if i < len(linha_f) else None
+                    if isinstance(bruto_f, str) and bruto_f.startswith("="):
+                        leitura.ocorrencias.append({
+                            "linha": numero_linha, "coluna": nome_coluna, "valor": bruto_f[:40],
+                            "erro": "Célula com fórmula na planilha, não é informação da fonte; valor recusado"})
+                        continue
+                    valor = _numero(linha[i])
+                    if valor is None:
+                        continue
+                    leitura.exercicios.add(ano)
+                    _acrescentar(leitura, id_ente, ano, campo, valor, None, nome_coluna, aba, numero_linha, liberados)
+    finally:
+        valores.close()
+        formulas.close()
+    data = _data_propriedades(conteudo)
+    for leitura in leituras.values():
+        leitura.data_extracao = data
+    return leituras
+
+
 LEITORES = {"SICONFI": ler_siconfi, "SIOPE": ler_siope, "SIOPS": ler_siops, "TCE": ler_tce}
 
 
 # ------------------------------------------------------------------ gravação
 
-def _linhas(session: Session, leitura: Leitura, nome_arquivo: str) -> tuple[list[Linha], dict[str, int]]:
-    declaracao = LAYOUTS[leitura.fonte]["declaracao"]
+def _linhas(session: Session, leitura: Leitura, nome_arquivo: str,
+            declaracao: str | None = None) -> tuple[list[Linha], dict[str, int]]:
+    declaracao = declaracao or LAYOUTS[leitura.fonte]["declaracao"]
     esferas = dict(session.execute(select(Ente.id_ente, Ente.esfera)).all())
     mapeamentos = {}
     for m in session.scalars(select(cf.Mapeamento).where(cf.Mapeamento.declaracao_id == declaracao).order_by(cf.Mapeamento.versao)):
@@ -321,9 +408,12 @@ def _linhas(session: Session, leitura: Leitura, nome_arquivo: str) -> tuple[list
     linhas = []
     for (id_ente, ano, campo), dado in leitura.valores.items():
         definicao = POR_ID.get(campo)
-        if definicao is None:
+        if dado.get("componente"):
+            componente = dado["componente"]
+        elif definicao is None:
             continue
-        componente = COMPONENTE_DO_LEGADO.get(definicao.bloco, definicao.bloco)
+        else:
+            componente = COMPONENTE_DO_LEGADO.get(definicao.bloco, definicao.bloco)
         if componente not in COMPONENTES_MIGRADOS:  # compensações financeiras: fora do art. 115
             continue
         if esferas.get(id_ente) == "DF":
@@ -350,7 +440,10 @@ def importar_arquivo(session: Session, nome_arquivo: str, conteudo: bytes, usuar
     fonte = identificar(nome_arquivo, conteudo)
     layout = LAYOUTS[fonte]
     hash_conteudo = hashlib.sha256(conteudo).hexdigest()  # o mesmo da carga da versão 1, para reconhecer o arquivo
-    existente = session.scalar(select(cf.Lote).where(cf.Lote.hash_conteudo == hash_conteudo, cf.Lote.situacao == "CONCLUIDO"))
+    versao_leitura = layout.get("versao_leitura", 1)
+    anteriores = session.scalars(select(cf.Lote).where(cf.Lote.hash_conteudo == hash_conteudo, cf.Lote.situacao == "CONCLUIDO"))
+    existente = next((lote for lote in anteriores
+                      if json.loads(lote.parametros or "{}").get("versao_leitura", 1) >= versao_leitura), None)
     if existente is not None:
         return {"fonte": fonte, "nome": layout["nome"], "arquivo": nome_arquivo, "lote": existente.id, "situacao": "JA_IMPORTADO",
                 "novos": 0, "novas_versoes": 0, "repetidos": 0, "ocorrencias": 0,
@@ -358,6 +451,8 @@ def importar_arquivo(session: Session, nome_arquivo: str, conteudo: bytes, usuar
     semear(session)
     semear_catalogo(session)
     aviso(f"Lendo {layout['nome']} ({nome_arquivo})...")
+    if fonte == "ESTADOS":
+        return _importar_estados(session, nome_arquivo, conteudo, usuario, hash_conteudo, pasta_arquivos, aviso)
     leitura = LEITORES[fonte](session, conteudo)
     linhas, mapeamentos = _linhas(session, leitura, nome_arquivo)
     if not linhas:
@@ -365,7 +460,8 @@ def importar_arquivo(session: Session, nome_arquivo: str, conteudo: bytes, usuar
     data_extracao = leitura.data_extracao or _data_propriedades(conteudo)
     lote = cf.Lote(
         declaracao_id=layout["declaracao"], origem_tipo="ARQUIVO", arquivo=nome_arquivo, aba=None,
-        parametros=json.dumps({"layout_fixo": fonte, "exercicios": sorted(leitura.exercicios)}, ensure_ascii=False),
+        parametros=json.dumps({"layout_fixo": fonte, "exercicios": sorted(leitura.exercicios),
+                               "versao_leitura": versao_leitura}, ensure_ascii=False),
         hash_conteudo=hash_conteudo, data_extracao=data_extracao, data_importacao=datetime.now().replace(microsecond=0),
         usuario=usuario, situacao="EM_ANDAMENTO",
         observacao=f"Base de layout fixo: {layout['nome']} ({layout['descricao']}).",
@@ -391,6 +487,50 @@ def importar_arquivo(session: Session, nome_arquivo: str, conteudo: bytes, usuar
                      f"{_milhar(contagem['novas_versoes'])} novas versões, {_milhar(contagem['repetidos'])} iguais aos vigentes, "
                      f"{_milhar(len(leitura.ocorrencias))} ocorrências."),
     }
+
+
+def _importar_estados(session: Session, nome_arquivo: str, conteudo: bytes, usuario: str, hash_conteudo: str,
+                      pasta_arquivos: Path | None, aviso) -> dict:
+    """Um lote por declaração (Sefaz, Sefaz 2, BB, Confaz), todos do mesmo arquivo."""
+    layout = LAYOUTS["ESTADOS"]
+    leituras = ler_estados(session, conteudo)
+    copia = None
+    if pasta_arquivos is not None:
+        pasta_arquivos.mkdir(parents=True, exist_ok=True)
+        copia = pasta_arquivos / f"estados-{hash_conteudo[:12]}.xlsx"
+        copia.write_bytes(conteudo)
+    totais = {"novos": 0, "novas_versoes": 0, "repetidos": 0, "ocorrencias": 0}
+    partes, lotes = [], []
+    for declaracao, leitura in leituras.items():
+        linhas, mapeamentos = _linhas(session, leitura, nome_arquivo, declaracao)
+        if not linhas:
+            continue
+        lote = cf.Lote(
+            declaracao_id=declaracao, origem_tipo="ARQUIVO", arquivo=nome_arquivo, aba=None,
+            parametros=json.dumps({"layout_fixo": "ESTADOS", "exercicios": sorted(leitura.exercicios), "versao_leitura": 1,
+                                   **({"copia_local": copia.name} if copia else {})}, ensure_ascii=False),
+            hash_conteudo=hash_conteudo, data_extracao=leitura.data_extracao,
+            data_importacao=datetime.now().replace(microsecond=0), usuario=usuario, situacao="EM_ANDAMENTO",
+            observacao=f"Base de layout fixo: {layout['nome']} — declaração {declaracao}.",
+        )
+        session.add(lote)
+        session.flush()
+        aviso(f"Gravando {_milhar(len(linhas))} valores de {declaracao}...")
+        contagem = persistir(session, lote, linhas, "", "ANUAL", leitura.data_extracao, mapeamentos)
+        lote.erros = len(leitura.ocorrencias)
+        lote.relatorio = json.dumps({"erros": leitura.ocorrencias[:5000]}, ensure_ascii=False)
+        lote.situacao = "CONCLUIDO"
+        for chave in ("novos", "novas_versoes", "repetidos"):
+            totais[chave] += contagem[chave]
+        totais["ocorrencias"] += len(leitura.ocorrencias)
+        lotes.append(lote.id)
+        partes.append(f"{declaracao} lote {lote.id}: {_milhar(contagem['novos'])} novos, "
+                      f"{_milhar(contagem['novas_versoes'])} novas versões, {_milhar(len(leitura.ocorrencias))} ocorrências")
+    if not lotes:
+        raise LayoutDesconhecido(f"{nome_arquivo}: nenhum valor reconhecido na planilha.")
+    session.commit()
+    return {"fonte": "ESTADOS", "nome": layout["nome"], "arquivo": nome_arquivo, "lote": lotes[0], "lotes": lotes,
+            "situacao": "IMPORTADO", **totais, "mensagem": f"{layout['nome']}: " + "; ".join(partes) + "."}
 
 
 def _centavos(valor: float) -> int:

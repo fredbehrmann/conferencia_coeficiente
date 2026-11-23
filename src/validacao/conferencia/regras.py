@@ -111,7 +111,7 @@ REGRAS: dict[str, dict] = {
     "DAX": {
         "nome": "Divergência com base auxiliar",
         "tipo": "Divergência",
-        "objetivo": "Comparar a referência com cada base auxiliar comparável (SIOPE, SIOPS, TCE, balanço).",
+        "objetivo": "Comparar a referência com cada base auxiliar comparável (SIOPE, SIOPS, TCE, Sefaz, BB, Confaz, balanço).",
         "aplicacao": "Pares com parcela comum (comparação plena ou com ressalva).",
         "formula": "excede(|fonte − referência|, tolerância absoluta) e/ou excede(|dif| ÷ |referência|, tolerância relativa); gravidade alta se |dif %| > faixa alta",
         "parametros": {"tolerancia_absoluta": 1000.0, "tolerancia_relativa": 0.01, "modo": "AMBAS", "faixa_alta": 0.20},

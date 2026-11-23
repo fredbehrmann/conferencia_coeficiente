@@ -230,12 +230,26 @@
   let quadroAtivo = null;
   const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
+  async function lerArquivo(arquivo) {
+    // Lê o arquivo inteiro antes de enviar: se ele estiver aberto no Excel, ainda sincronizando no
+    // OneDrive ou tiver mudado depois de escolhido, o navegador não consegue lê-lo e o envio
+    // falharia com um "Failed to fetch" sem explicação.
+    try {
+      return new Blob([await arquivo.arrayBuffer()], { type: arquivo.type || "application/octet-stream" });
+    } catch (erro) {
+      throw Object.assign(new Error(
+        `o navegador não conseguiu ler ${arquivo.name} no seu computador. Feche o arquivo no Excel, ` +
+        "espere o OneDrive terminar de sincronizar e escolha o arquivo de novo"), { definitivo: true });
+    }
+  }
+
   async function enviarArquivo(arquivo, aviso) {
     // Um arquivo por pedido, com novas tentativas: um envio único e grande pode ser cortado pelo proxy.
+    const conteudo = await lerArquivo(arquivo);
     let ultimoErro = null;
     for (let tentativa = 1; tentativa <= 4; tentativa++) {
       const dados = new FormData();
-      dados.append("arquivo", arquivo, arquivo.name);
+      dados.append("arquivo", conteudo, arquivo.name);
       try {
         const resposta = await fetch("/importar/envio", { method: "POST", body: dados });
         const corpo = await resposta.json().catch(() => ({ ok: false, erro: `resposta ${resposta.status} do servidor` }));

@@ -14,7 +14,8 @@ from validacao.conferencia.catalogo import PARCELAS_DEDUCAO, PARCELAS_SOMA, SIGL
 from validacao.conferencia.dinheiro import diferenca, reais
 
 ESTADOS_COM_VALOR = ("VALOR", "ZERO")
-ROTULO_CONCEITO = {"LIQUIDO": "líquido", "BRUTO": "bruto", "INDEFINIDO": "sem conceito informado", "LIQUIDO_FUNDEB": "líquido de FUNDEB"}
+ROTULO_CONCEITO = {"LIQUIDO": "líquido", "BRUTO": "bruto", "INDEFINIDO": "sem conceito informado", "LIQUIDO_FUNDEB": "líquido de FUNDEB",
+                   "SEM_ADICIONAL": "líquido, sem o adicional do FECOP"}
 ROTULO_PARCELA_COMPARADA = {
     "LIQUIDO": "valor líquido de deduções",
     "BRUTO": "receita bruta, antes de deduções",
@@ -93,7 +94,7 @@ def montar_fonte(declaracao: str, registros: list[RegistroV]) -> FonteCaso:
             por_parcela[registro.parcela] = registro
     total = por_parcela.get("TOTAL")
     medidas: dict[str, Medida] = {}
-    if total is not None and total.estado in ESTADOS_COM_VALOR and total.conceito in ("LIQUIDO", "BRUTO", "INDEFINIDO", "LIQUIDO_FUNDEB"):
+    if total is not None and total.estado in ESTADOS_COM_VALOR and total.conceito in ("LIQUIDO", "BRUTO", "INDEFINIDO", "LIQUIDO_FUNDEB", "SEM_ADICIONAL"):
         medidas[total.conceito] = Medida(total.conceito, total.valor or 0, "valor declarado", [total.id])
 
     bruto = por_parcela.get("BRUTO")
@@ -174,6 +175,10 @@ def comparar(referencia: FonteCaso | None, fonte: FonteCaso, conceito_ref: str) 
                 parcela += f" (o conceito de referência é {ROTULO_CONCEITO.get(conceito_ref, conceito_ref)}; a referência foi levada ao mesmo conceito da fonte)"
             comparacao = _montar(fonte, referencia, conceito, "SIM", parcela, "")
             return _inferir_fundeb(comparacao, fonte, referencia, conceito) or comparacao
+    if "SEM_ADICIONAL" in fonte.medidas:
+        alvo = conceito_ref if conceito_ref in referencia.medidas else next(iter(referencia.medidas))
+        if alvo in ("LIQUIDO", "BRUTO"):
+            return _somar_adicional(fonte, referencia, alvo)
     if "INDEFINIDO" in fonte.medidas:
         alvo = conceito_ref if conceito_ref in referencia.medidas else next(iter(referencia.medidas))
         motivo = f"{nome} não informa se o valor é bruto ou líquido; comparado com o valor {ROTULO_CONCEITO.get(alvo, alvo)} da {ref_nome}."
@@ -193,6 +198,55 @@ def comparar(referencia: FonteCaso | None, fonte: FonteCaso, conceito_ref: str) 
     comparacao.valor_fonte = next(iter(fonte.medidas.values())).valor
     comparacao.valor_ref = next(iter(referencia.medidas.values())).valor
     return comparacao
+
+
+def _adicional_da_referencia(referencia: FonteCaso, conceito: str) -> tuple[int, list[int]]:
+    """Adicional do FECOP que a própria referência declara: bruto, ou líquido das suas outras deduções."""
+    por_parcela: dict[str, RegistroV] = {}
+    for registro in sorted((r for r in referencia.registros if r.vigente and r.periodo == "ANUAL"), key=lambda r: r.id):
+        if registro.parcela and registro.parcela not in por_parcela:
+            por_parcela[registro.parcela] = registro
+    adicional = por_parcela.get("FECOP")
+    if adicional is None or not adicional.valor:
+        return 0, []
+    valor, ids = adicional.valor, [adicional.id]
+    deducao = por_parcela.get("FECOP_OUTRAS_DEDUCOES")
+    if conceito == "LIQUIDO" and deducao is not None and deducao.valor:
+        valor -= abs(deducao.valor)
+        ids.append(deducao.id)
+    return valor, ids
+
+
+def _somar_adicional(fonte: FonteCaso, referencia: FonteCaso, conceito: str) -> Comparacao:
+    """Fonte que não inclui o adicional do FECOP (Confaz): soma-se o adicional declarado na referência.
+
+    A comparação passa a medir só o ICMS sem o adicional; o adicional vem da própria referência e não é
+    confirmado pela fonte."""
+    nome, ref_nome = sigla(fonte.declaracao), sigla(referencia.declaracao)
+    medida = fonte.medidas["SEM_ADICIONAL"]
+    adicional, _ids = _adicional_da_referencia(referencia, conceito)
+    medida_ref = referencia.medidas[conceito]
+    valor = medida.valor + adicional
+    if adicional:
+        derivacao = f"{nome} {reais(medida.valor)} + adicional do FECOP declarado na {ref_nome} {reais(adicional)}"
+        motivo = (f"{nome} não inclui o adicional do FECOP; somado o adicional que a própria {ref_nome} declara "
+                  f"({reais(adicional)}). A comparação confirma o ICMS sem o adicional, não o adicional.")
+        situacao = "RESSALVA"
+    elif any(r.parcela == "BRUTO" for r in referencia.registros):
+        derivacao, motivo, situacao = "valor declarado (a referência não declara adicional do FECOP)", "", "SIM"
+    else:
+        derivacao = "valor declarado"
+        motivo = (f"{nome} não inclui o adicional do FECOP e a {ref_nome} não abre o adicional; "
+                  "a diferença pode ser o próprio adicional.")
+        situacao = "RESSALVA"
+    dif = diferenca(valor, medida_ref.valor)
+    return Comparacao(
+        declaracao=fonte.declaracao, referencia=referencia.declaracao, situacao=situacao, conceito=conceito,
+        valor_ref=medida_ref.valor, valor_fonte=valor, derivacao_ref=medida_ref.derivacao, derivacao_fonte=derivacao,
+        motivo=motivo, parcela=ROTULO_PARCELA_COMPARADA.get(conceito, conceito) + " (fonte sem o adicional do FECOP)",
+        assinada=dif["assinada"], absoluta=dif["absoluta"], percentual=dif["percentual"],
+        inferencia="SEM_ADICIONAL" if adicional else "",
+    )
 
 
 def _inferir_fundeb(comparacao: Comparacao, fonte: FonteCaso, referencia: FonteCaso, conceito_fonte: str) -> Comparacao | None:
@@ -244,7 +298,7 @@ def _montar(fonte, referencia, conceito, situacao, parcela, motivo, conceito_fon
 
 def valor_serie(fonte: FonteCaso, conceito_ref: str) -> int | None:
     """Valor usado nas regras de série temporal: o conceito de referência, se houver."""
-    for conceito in (conceito_ref, "LIQUIDO", "BRUTO", "INDEFINIDO"):
+    for conceito in (conceito_ref, "LIQUIDO", "BRUTO", "INDEFINIDO", "SEM_ADICIONAL"):
         if conceito in fonte.medidas:
             return fonte.medidas[conceito].valor
     return None
